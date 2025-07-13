@@ -28,7 +28,6 @@ struct VideoTrimmerView: View {
         self.onTrimComplete = onTrimComplete
         self.onCancel = onCancel
         self._playerObserver = StateObject(wrappedValue: PlayerObserver())
-        print("VideoTrimmerView init for URL: \(videoURL)")
     }
     
     private var player: AVPlayer {
@@ -63,9 +62,6 @@ struct VideoTrimmerView: View {
                     VideoPlayer(player: player)
                         .frame(height: 300)
                         .cornerRadius(8)
-                        .onAppear {
-                            print("VideoPlayer appeared with duration: \(duration)")
-                        }
                 } else {
                     VStack(spacing: 12) {
                         ProgressView()
@@ -85,9 +81,6 @@ struct VideoTrimmerView: View {
                     .frame(maxWidth: .infinity)
                     .background(Color.secondary.opacity(0.1))
                     .cornerRadius(8)
-                    .onAppear {
-                        print("Loading state appeared, duration: \(duration)")
-                    }
                 }
             }
             .onAppear {
@@ -288,12 +281,9 @@ struct VideoTrimmerView: View {
     }
     
     private func setupPlayer() {
-        print("VideoTrimmerView setupPlayer called")
         playerObserver.setupPlayer(url: videoURL) { currentTime, duration, isPlaying in
-            print("Player update callback: currentTime=\(currentTime), duration=\(duration?.description ?? "nil"), isPlaying=\(isPlaying)")
             self.currentTime = currentTime
             if let duration = duration {
-                print("Setting duration to: \(duration)")
                 self.duration = duration
                 self.endTime = duration
             }
@@ -486,7 +476,6 @@ class PlayerObserver: NSObject, ObservableObject {
     override init() {
         self.player = AVPlayer()
         super.init()
-        print("PlayerObserver init")
         
         // Force initialization of AVFoundation subsystems
         DispatchQueue.main.async {
@@ -500,14 +489,9 @@ class PlayerObserver: NSObject, ObservableObject {
         _ = AVPlayer.self
         _ = AVPlayerItem.self
         _ = AVURLAsset.self
-        print("AVFoundation classes loaded")
     }
     
     func setupPlayer(url: URL, updateCallback: @escaping (Double, Double?, Bool) -> Void) {
-        print("Setting up player for URL: \(url)")
-        print("URL path: \(url.path)")
-        print("File exists at path: \(FileManager.default.fileExists(atPath: url.path))")
-        
         // Clean up previous observer if exists
         cleanup()
         
@@ -515,22 +499,20 @@ class PlayerObserver: NSObject, ObservableObject {
         
         // Try to resolve the URL to handle any encoding issues
         let resolvedURL = url.standardizedFileURL
-        print("Resolved URL: \(resolvedURL)")
-        print("File exists at resolved path: \(FileManager.default.fileExists(atPath: resolvedURL.path))")
         
         player = AVPlayer(url: resolvedURL)
         
         // Get video duration
         let asset = AVURLAsset(url: resolvedURL)
+        
         Task {
             do {
                 let duration = try await asset.load(.duration)
-                print("Successfully loaded video duration: \(duration.seconds) seconds")
                 await MainActor.run {
                     updateCallback(0, duration.seconds, false)
                 }
             } catch {
-                print("Failed to load video duration: \(error)")
+                // Handle error silently or show user-friendly message
             }
         }
         
@@ -573,7 +555,6 @@ class PlayerObserver: NSObject, ObservableObject {
     }
     
     deinit {
-        print("PlayerObserver deinit")
         cleanup()
     }
 }

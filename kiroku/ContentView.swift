@@ -7,10 +7,18 @@
 
 import SwiftUI
 
+// Helper struct for sheet presentation with item-based approach
+struct VideoTrimItem: Identifiable {
+    let id = UUID()
+    let url: URL
+    let key: UUID
+}
+
 struct ContentView: View {
     @StateObject private var recordingManager = ScreenRecordingManager()
     @State private var showingTrimmer = false
-    @State private var videoToTrim: URL?
+    @State private var selectedVideoURL: URL? // Store the selected URL
+    @State private var trimmerKey = UUID() // Force view recreation
     
     var body: some View {
         VStack(spacing: 16) {
@@ -149,9 +157,8 @@ struct ContentView: View {
                                     onOpen: { recordingManager.openRecording(recording) },
                                     onDelete: { recordingManager.deleteRecording(recording) },
                                     onTrim: {
-                                        print("Setting video to trim: \(recording)")
-                                        print("File exists: \(FileManager.default.fileExists(atPath: recording.path))")
-                                        videoToTrim = recording
+                                        selectedVideoURL = recording
+                                        trimmerKey = UUID()
                                         showingTrimmer = true
                                     }
                                 )
@@ -173,23 +180,29 @@ struct ContentView: View {
             .padding(.bottom)
         }
         .frame(width: 300, height: 400)
-        .sheet(isPresented: $showingTrimmer) {
-            if let videoURL = videoToTrim {
-                VideoTrimmerView(
-                    videoURL: videoURL,
-                    onTrimComplete: { trimmedURL in
-                        recordingManager.recordings.append(trimmedURL)
-                        recordingManager.saveRecordings()
-                        showingTrimmer = false
-                        videoToTrim = nil
-                    },
-                    onCancel: {
-                        showingTrimmer = false
-                        videoToTrim = nil
-                    }
-                )
-                .id(videoURL.absoluteString) // Force recreation for each video
+        .sheet(item: Binding<VideoTrimItem?>(
+            get: { selectedVideoURL.map { VideoTrimItem(url: $0, key: trimmerKey) } },
+            set: { newValue in
+                selectedVideoURL = newValue?.url
+                if newValue == nil {
+                    showingTrimmer = false
+                }
             }
+        )) { item in
+            VideoTrimmerView(
+                videoURL: item.url,
+                onTrimComplete: { trimmedURL in
+                    recordingManager.recordings.append(trimmedURL)
+                    recordingManager.saveRecordings()
+                    selectedVideoURL = nil
+                    showingTrimmer = false
+                },
+                onCancel: {
+                    selectedVideoURL = nil
+                    showingTrimmer = false
+                }
+            )
+            .id(item.key)
         }
     }
 }

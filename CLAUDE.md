@@ -9,6 +9,7 @@ Kiroku is a simple macOS menubar app for screen recording. It provides an easy w
 - **kirokuApp.swift**: Main app entry point with NSApplicationDelegate for menubar functionality
 - **ContentView.swift**: SwiftUI interface with recording controls and past recordings list
 - **ScreenRecordingManager.swift**: Core recording logic using FFmpeg with AVFoundation
+- **VideoTrimmerView.swift**: Video trimming interface with AVPlayerView and interactive scrubber
 - **kiroku.entitlements**: macOS permissions for screen recording and file access
 
 ### Technical Implementation
@@ -17,12 +18,15 @@ Kiroku is a simple macOS menubar app for screen recording. It provides an easy w
 - **FFmpeg Discovery**: Supports multiple installation paths (Homebrew, MacPorts, system install)
 - **Permission Handling**: Uses `CGPreflightScreenCaptureAccess()` for proper macOS screen recording permissions
 - **File Management**: Saves recordings to `~/Documents/Kiroku Recordings/` with timestamp naming
+- **Video Trimming**: AVPlayer-based preview with interactive scrubber and FFmpeg trimming backend
+- **QuickTime Compatibility**: Re-encodes trimmed videos with H.264/AAC for universal playback
 
 ### Key Features
 - Menubar-only interface (no dock icon)
 - Dynamic screen device detection for cross-machine compatibility
 - FFmpeg installation detection with user guidance
-- Past recordings list with open/delete functionality
+- Past recordings list with open/delete/trim functionality
+- Video trimming with interactive scrubber and draggable start/end handles
 - Proper macOS permission flow
 - Cursor capture in screen recordings
 
@@ -30,6 +34,7 @@ Kiroku is a simple macOS menubar app for screen recording. It provides an easy w
 
 ### Dependencies
 - FFmpeg (external dependency, auto-detected at runtime)
+- AVFoundation and AVKit for video playback and trimming
 - macOS 10.15+ for screen recording APIs
 - No sandboxing (disabled for external process execution)
 
@@ -43,9 +48,13 @@ Kiroku is a simple macOS menubar app for screen recording. It provides an easy w
 - Verify FFmpeg detection across installation methods
 - Test permission flows and error states
 - Validate recording quality and file output
+- Test video trimming across app sessions and different video formats
+- Verify QuickTime compatibility of trimmed videos
 
 ## Codebase Patterns
 - ObservableObject pattern for state management
 - Process execution for external FFmpeg calls
 - SwiftUI declarative UI with conditional states
+- Item-based sheet presentation for robust state management
+- KVO observers for AVPlayer state tracking
 - Proper error handling and user feedback

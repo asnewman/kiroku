@@ -249,9 +249,9 @@ class ScreenRecordingManager: NSObject, ObservableObject {
         
         do {
             let files = try FileManager.default.contentsOfDirectory(at: recordingsDir, includingPropertiesForKeys: nil)
-            let movFiles = files.filter { $0.pathExtension == "mov" }
+            let videoFiles = files.filter { ["mov", "gif"].contains($0.pathExtension.lowercased()) }
             
-            recordings = movFiles.sorted { 
+            recordings = videoFiles.sorted { 
                 ((try? $0.resourceValues(forKeys: [.creationDateKey]).creationDate) ?? Date.distantPast) > 
                 ((try? $1.resourceValues(forKeys: [.creationDateKey]).creationDate) ?? Date.distantPast)
             }
@@ -292,6 +292,90 @@ class ScreenRecordingManager: NSObject, ObservableObject {
     private func openScreenRecordingPreferences() {
         let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")!
         NSWorkspace.shared.open(url)
+    }
+    
+    func exportAsGIF(_ url: URL, completion: @escaping (Result<URL, Error>) -> Void) {
+        guard let ffmpegPath = ffmpegPath else {
+            completion(.failure(NSError(domain: "FFmpegNotFound", code: 1, userInfo: [NSLocalizedDescriptionKey: "FFmpeg not found"])))
+            return
+        }
+        
+        let documentsPath = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        let recordingsDir = documentsPath.appendingPathComponent("Kiroku Recordings")
+        
+        let gifURL = recordingsDir.appendingPathComponent(url.deletingPathExtension().lastPathComponent + ".gif")
+        
+        let exportProcess = Process()
+        exportProcess.executableURL = URL(fileURLWithPath: ffmpegPath)
+        exportProcess.arguments = [
+            "-i", url.path,
+            "-vf", "fps=15,scale=640:-1:flags=lanczos,palettegen=reserve_transparent=0",
+            "-y",
+            gifURL.path.replacingOccurrences(of: ".gif", with: "_palette.png")
+        ]
+        
+        let pipe = Pipe()
+        exportProcess.standardError = pipe
+        exportProcess.standardOutput = FileHandle.nullDevice
+        
+        exportProcess.terminationHandler = { process in
+            if process.terminationStatus == 0 {
+                let finalProcess = Process()
+                finalProcess.executableURL = URL(fileURLWithPath: ffmpegPath)
+                finalProcess.arguments = [
+                    "-i", url.path,
+                    "-i", gifURL.path.replacingOccurrences(of: ".gif", with: "_palette.png"),
+                    "-lavfi", "fps=15,scale=640:-1:flags=lanczos[v];[v][1:v]paletteuse",
+                    "-y",
+                    gifURL.path
+                ]
+                
+                finalProcess.terminationHandler = { finalProcess in
+                    try? FileManager.default.removeItem(at: URL(fileURLWithPath: gifURL.path.replacingOccurrences(of: ".gif", with: "_palette.png")))
+                    
+                    DispatchQueue.main.async {
+                        if finalProcess.terminationStatus == 0 {
+                            completion(.success(gifURL))
+                        } else {
+                            completion(.failure(NSError(domain: "GIFExportFailed", code: Int(finalProcess.terminationStatus), userInfo: [NSLocalizedDescriptionKey: "Failed to create GIF"])))
+                        }
+                    }
+                }
+                
+                do {
+                    try finalProcess.run()
+                } catch {
+                    DispatchQueue.main.async {
+                        completion(.failure(error))
+                    }
+                }
+            } else {
+                DispatchQueue.main.async {
+                    completion(.failure(NSError(domain: "PaletteGenerationFailed", code: Int(process.terminationStatus), userInfo: [NSLocalizedDescriptionKey: "Failed to generate palette"])))
+                }
+            }
+        }
+        
+        do {
+            try exportProcess.run()
+        } catch {
+            completion(.failure(error))
+        }
+    }
+    
+    func copyToClipboard(_ url: URL) {
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        
+        if url.pathExtension.lowercased() == "gif" {
+            if let gifData = try? Data(contentsOf: url) {
+                pasteboard.setData(gifData, forType: NSPasteboard.PasteboardType("com.compuserve.gif"))
+            }
+        } else {
+            if let movieData = try? Data(contentsOf: url) {
+                pasteboard.setData(movieData, forType: NSPasteboard.PasteboardType("com.apple.quicktime-movie"))
+            }
+        }
     }
     
     private func warmUpAVFoundation() {

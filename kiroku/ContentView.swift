@@ -160,6 +160,20 @@ struct ContentView: View {
                                         selectedVideoURL = recording
                                         trimmerKey = UUID()
                                         showingTrimmer = true
+                                    },
+                                    onExportGIF: {
+                                        recordingManager.exportAsGIF(recording) { result in
+                                            switch result {
+                                            case .success(let gifURL):
+                                                print("GIF exported successfully: \(gifURL.path)")
+                                                recordingManager.saveRecordings()
+                                            case .failure(let error):
+                                                print("Failed to export GIF: \(error.localizedDescription)")
+                                            }
+                                        }
+                                    },
+                                    onCopyToClipboard: {
+                                        recordingManager.copyToClipboard(recording)
                                     }
                                 )
                             }
@@ -212,6 +226,8 @@ struct RecordingRow: View {
     let onOpen: () -> Void
     let onDelete: () -> Void
     let onTrim: () -> Void
+    let onExportGIF: () -> Void
+    let onCopyToClipboard: () -> Void
     
     private var recordingName: String {
         recording.deletingPathExtension().lastPathComponent
@@ -227,46 +243,83 @@ struct RecordingRow: View {
         return ""
     }
     
+    private var isGIF: Bool {
+        recording.pathExtension.lowercased() == "gif"
+    }
+    
     var body: some View {
-        HStack(spacing: 8) {
-            VStack(alignment: .leading, spacing: 2) {
+        VStack(spacing: 4) {
+            // Top line: filename and GIF badge
+            HStack(spacing: 4) {
                 Text(recordingName)
                     .font(.caption)
                     .lineLimit(1)
                     .truncationMode(.middle)
                 
+                if isGIF {
+                    Text("GIF")
+                        .font(.caption2)
+                        .padding(.horizontal, 4)
+                        .padding(.vertical, 1)
+                        .background(Color.green.opacity(0.2))
+                        .foregroundColor(.green)
+                        .cornerRadius(3)
+                }
+                
+                Spacer()
+            }
+            
+            // Bottom line: file size and buttons
+            HStack(spacing: 4) {
                 Text(fileSize)
                     .font(.caption2)
                     .foregroundColor(.secondary)
-            }
-            
-            Spacer()
-            
-            HStack(spacing: 4) {
+                
+                Spacer()
+                
                 Button(action: onOpen) {
                     Image(systemName: "play.circle")
                         .foregroundColor(.blue)
+                        .font(.system(size: 16))
                 }
                 .buttonStyle(.plain)
                 .help("Open recording")
                 
-                Button(action: onTrim) {
-                    Image(systemName: "scissors")
-                        .foregroundColor(.orange)
+                Menu {
+                    if !isGIF {
+                        Button(action: onTrim) {
+                            Label("Trim", systemImage: "scissors")
+                        }
+                        
+                        Button(action: onExportGIF) {
+                            Label("Export as GIF", systemImage: "photo")
+                        }
+                        
+                        Divider()
+                    }
+                    
+                    Button(action: onCopyToClipboard) {
+                        Label("Copy to Clipboard", systemImage: "doc.on.clipboard")
+                    }
+                    
+                    Divider()
+                    
+                    Button(action: onDelete) {
+                        Label("Delete", systemImage: "trash")
+                    }
+                } label: {
+                    Image(systemName: "ellipsis.circle")
+                        .foregroundColor(.secondary)
+                        .font(.system(size: 16))
                 }
                 .buttonStyle(.plain)
-                .help("Trim recording")
-                
-                Button(action: onDelete) {
-                    Image(systemName: "trash")
-                        .foregroundColor(.red)
-                }
-                .buttonStyle(.plain)
-                .help("Delete recording")
+                .help("More options")
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
             }
         }
-        .padding(.vertical, 4)
         .padding(.horizontal, 8)
+        .padding(.vertical, 6)
         .background(Color.secondary.opacity(0.1))
         .cornerRadius(6)
     }

@@ -369,11 +369,19 @@ class ScreenRecordingManager: NSObject, ObservableObject {
         
         if url.pathExtension.lowercased() == "gif" {
             if let gifData = try? Data(contentsOf: url) {
+                // Try multiple GIF UTI types for maximum compatibility
                 pasteboard.setData(gifData, forType: NSPasteboard.PasteboardType("com.compuserve.gif"))
+                pasteboard.setData(gifData, forType: NSPasteboard.PasteboardType("public.gif"))
+                // Also set as file URL for apps that prefer file references
+                pasteboard.setString(url.absoluteString, forType: .fileURL)
             }
         } else {
+            // Use file URL approach for better compatibility with apps like Slack
+            pasteboard.setString(url.absoluteString, forType: .fileURL)
+            
+            // Also try setting as movie data with modern UTI types
             if let movieData = try? Data(contentsOf: url) {
-                pasteboard.setData(movieData, forType: NSPasteboard.PasteboardType("com.apple.quicktime-movie"))
+                pasteboard.setData(movieData, forType: NSPasteboard.PasteboardType("public.movie"))
             }
         }
     }

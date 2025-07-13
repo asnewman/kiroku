@@ -19,6 +19,8 @@ Kiroku is a simple macOS menubar app for screen recording. It provides an easy w
 - **Permission Handling**: Uses `CGPreflightScreenCaptureAccess()` for proper macOS screen recording permissions
 - **File Management**: Saves recordings to `~/Documents/Kiroku Recordings/` with timestamp naming
 - **Video Trimming**: AVPlayer-based preview with interactive scrubber and FFmpeg trimming backend
+- **GIF Export**: Two-pass FFmpeg conversion with palette generation for optimal quality
+- **Clipboard Integration**: Native pasteboard support with proper UTI types
 - **QuickTime Compatibility**: Re-encodes trimmed videos with H.264/AAC for universal playback
 
 ### Key Features
@@ -27,6 +29,9 @@ Kiroku is a simple macOS menubar app for screen recording. It provides an easy w
 - FFmpeg installation detection with user guidance
 - Past recordings list with open/delete/trim functionality
 - Video trimming with interactive scrubber and draggable start/end handles
+- GIF export with high-quality palette generation
+- Copy to clipboard support for both video and GIF files
+- Dropdown menu interface for recording actions
 - Proper macOS permission flow
 - Cursor capture in screen recordings
 

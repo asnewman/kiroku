@@ -27,6 +27,7 @@ class ScreenRecordingManager: NSObject, ObservableObject {
         findFFmpegPath()
         detectScreenCaptureDevice()
         checkPermission()
+        warmUpAVFoundation()
     }
     
     func checkPermission() {
@@ -248,16 +249,23 @@ class ScreenRecordingManager: NSObject, ObservableObject {
         
         do {
             let files = try FileManager.default.contentsOfDirectory(at: recordingsDir, includingPropertiesForKeys: nil)
-            recordings = files.filter { $0.pathExtension == "mov" }.sorted { 
+            let movFiles = files.filter { $0.pathExtension == "mov" }
+            print("Found \(movFiles.count) .mov files in recordings directory:")
+            for file in movFiles {
+                print("  - \(file.lastPathComponent) (exists: \(FileManager.default.fileExists(atPath: file.path)))")
+            }
+            
+            recordings = movFiles.sorted { 
                 ((try? $0.resourceValues(forKeys: [.creationDateKey]).creationDate) ?? Date.distantPast) > 
                 ((try? $1.resourceValues(forKeys: [.creationDateKey]).creationDate) ?? Date.distantPast)
             }
+            print("Loaded \(recordings.count) recordings")
         } catch {
             print("Failed to load recordings: \(error)")
         }
     }
     
-    private func saveRecordings() {
+    func saveRecordings() {
         loadRecordings()
     }
     
@@ -289,5 +297,29 @@ class ScreenRecordingManager: NSObject, ObservableObject {
     private func openScreenRecordingPreferences() {
         let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")!
         NSWorkspace.shared.open(url)
+    }
+    
+    private func warmUpAVFoundation() {
+        print("Warming up AVFoundation...")
+        
+        // Create a dummy player to initialize AVFoundation frameworks
+        let dummyPlayer = AVPlayer()
+        
+        // Try to load an existing recording if available to warm up local file handling
+        if let firstRecording = recordings.first {
+            print("Warming up with existing recording: \(firstRecording.lastPathComponent)")
+            let asset = AVURLAsset(url: firstRecording)
+            let playerItem = AVPlayerItem(asset: asset)
+            dummyPlayer.replaceCurrentItem(with: playerItem)
+            
+            // Quick cleanup
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                dummyPlayer.replaceCurrentItem(with: nil)
+                print("AVFoundation warm-up complete with local file")
+            }
+        } else {
+            // Just create the player to initialize the frameworks
+            print("AVFoundation warm-up complete (no files to test)")
+        }
     }
 }

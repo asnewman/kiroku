@@ -9,6 +9,8 @@ import SwiftUI
 
 struct ContentView: View {
     @StateObject private var recordingManager = ScreenRecordingManager()
+    @State private var showingTrimmer = false
+    @State private var videoToTrim: URL?
     
     var body: some View {
         VStack(spacing: 16) {
@@ -145,7 +147,13 @@ struct ContentView: View {
                                 RecordingRow(
                                     recording: recording,
                                     onOpen: { recordingManager.openRecording(recording) },
-                                    onDelete: { recordingManager.deleteRecording(recording) }
+                                    onDelete: { recordingManager.deleteRecording(recording) },
+                                    onTrim: {
+                                        print("Setting video to trim: \(recording)")
+                                        print("File exists: \(FileManager.default.fileExists(atPath: recording.path))")
+                                        videoToTrim = recording
+                                        showingTrimmer = true
+                                    }
                                 )
                             }
                         }
@@ -165,6 +173,24 @@ struct ContentView: View {
             .padding(.bottom)
         }
         .frame(width: 300, height: 400)
+        .sheet(isPresented: $showingTrimmer) {
+            if let videoURL = videoToTrim {
+                VideoTrimmerView(
+                    videoURL: videoURL,
+                    onTrimComplete: { trimmedURL in
+                        recordingManager.recordings.append(trimmedURL)
+                        recordingManager.saveRecordings()
+                        showingTrimmer = false
+                        videoToTrim = nil
+                    },
+                    onCancel: {
+                        showingTrimmer = false
+                        videoToTrim = nil
+                    }
+                )
+                .id(videoURL.absoluteString) // Force recreation for each video
+            }
+        }
     }
 }
 
@@ -172,6 +198,7 @@ struct RecordingRow: View {
     let recording: URL
     let onOpen: () -> Void
     let onDelete: () -> Void
+    let onTrim: () -> Void
     
     private var recordingName: String {
         recording.deletingPathExtension().lastPathComponent
@@ -209,6 +236,13 @@ struct RecordingRow: View {
                 }
                 .buttonStyle(.plain)
                 .help("Open recording")
+                
+                Button(action: onTrim) {
+                    Image(systemName: "scissors")
+                        .foregroundColor(.orange)
+                }
+                .buttonStyle(.plain)
+                .help("Trim recording")
                 
                 Button(action: onDelete) {
                     Image(systemName: "trash")

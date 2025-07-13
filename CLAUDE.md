@@ -24,6 +24,7 @@ Kiroku is a simple macOS menubar app for screen recording. It provides an easy w
 - FFmpeg installation detection with user guidance
 - Past recordings list with open/delete functionality
 - Proper macOS permission flow
+- Cursor capture in screen recordings
 
 ## Development Notes
 

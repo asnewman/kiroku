@@ -183,6 +183,7 @@ class ScreenRecordingManager: NSObject, ObservableObject {
         // Use ffmpeg to capture screen with avfoundation
         recordingProcess?.arguments = [
             "-f", "avfoundation",
+            "-capture_cursor", "1", // Enable cursor capture
             "-i", "\(finalDeviceIndex):none",  // Use detected device index, no audio
             "-r", "30", // 30 fps
             "-vcodec", "libx264",

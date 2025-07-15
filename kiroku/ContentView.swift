@@ -29,40 +29,33 @@ struct ContentView: View {
                 Text("Kiroku")
                     .font(.headline)
                 Spacer()
+                
+                // Configure dropdown
+                Menu {
+                    Button(action: {
+                        recordingManager.toggleWebcamOverlay()
+                    }) {
+                        HStack {
+                            Image(systemName: recordingManager.webcamOverlayEnabled ? "checkmark" : "")
+                            Text("Overlay Webcam")
+                        }
+                    }
+                } label: {
+                    Image(systemName: "gearshape")
+                        .foregroundColor(.secondary)
+                        .font(.system(size: 16))
+                }
+                .buttonStyle(.plain)
+                .help("Configure recording settings")
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
             }
             .padding(.horizontal)
             .padding(.top)
             
             // Recording Controls
             VStack(spacing: 12) {
-                if !recordingManager.ffmpegFound {
-                    VStack(spacing: 8) {
-                        HStack {
-                            Image(systemName: "exclamationmark.triangle")
-                                .foregroundColor(.red)
-                            Text("FFmpeg Not Found")
-                                .font(.headline)
-                        }
-                        Text("Please install FFmpeg using Homebrew:\nbrew install ffmpeg")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                            .multilineTextAlignment(.center)
-                        
-                        Button(action: {
-                            if let url = URL(string: "https://formulae.brew.sh/formula/ffmpeg") {
-                                NSWorkspace.shared.open(url)
-                            }
-                        }) {
-                            Text("Install Instructions")
-                                .frame(maxWidth: .infinity)
-                                .padding(.vertical, 6)
-                        }
-                        .buttonStyle(.bordered)
-                    }
-                    .padding()
-                    .background(Color.red.opacity(0.1))
-                    .cornerRadius(8)
-                } else if !recordingManager.hasPermission {
+                if !recordingManager.hasPermission {
                     Button(action: {
                         recordingManager.startRecording() // This will open System Preferences
                     }) {

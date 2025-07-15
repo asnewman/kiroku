@@ -9,23 +9,29 @@ import Foundation
 import AVFoundation
 import AppKit
 import CoreGraphics
+import CoreVideo
 
 class ScreenRecordingManager: NSObject, ObservableObject {
     @Published var isRecording = false
     @Published var recordings: [URL] = []
     @Published var hasPermission = false
-    @Published var ffmpegFound = false
+    @Published var webcamOverlayEnabled = false
     
     private var recordingProcess: Process?
     private var currentRecordingURL: URL?
-    private var screenCaptureDeviceIndex: Int?
-    private var ffmpegPath: String?
+    
+    // AVFoundation for webcam capture
+    private var captureSession: AVCaptureSession?
+    private var webcamInput: AVCaptureDeviceInput?
+    private var webcamOutput: AVCaptureVideoDataOutput?
+    private var webcamVideoWriter: AVAssetWriter?
+    private var webcamVideoWriterInput: AVAssetWriterInput?
+    private var webcamTempURL: URL?
+    private var webcamSessionStarted = false
     
     override init() {
         super.init()
         loadRecordings()
-        findFFmpegPath()
-        detectScreenCaptureDevice()
         checkPermission()
         warmUpAVFoundation()
     }
@@ -34,102 +40,135 @@ class ScreenRecordingManager: NSObject, ObservableObject {
         hasPermission = hasScreenRecordingPermission()
     }
     
-    private func findFFmpegPath() {
-        let possiblePaths = [
-            "/opt/homebrew/bin/ffmpeg",    // Apple Silicon Homebrew
-            "/usr/local/bin/ffmpeg",       // Intel Homebrew
-            "/usr/bin/ffmpeg",             // System install
-            "/opt/local/bin/ffmpeg"        // MacPorts
-        ]
-        
-        for path in possiblePaths {
-            if FileManager.default.fileExists(atPath: path) {
-                ffmpegPath = path
-                ffmpegFound = true
-                print("Found ffmpeg at: \(path)")
-                return
-            }
-        }
-        
-        // Try using 'which' command as fallback
-        let whichProcess = Process()
-        whichProcess.executableURL = URL(fileURLWithPath: "/usr/bin/which")
-        whichProcess.arguments = ["ffmpeg"]
-        
-        let pipe = Pipe()
-        whichProcess.standardOutput = pipe
-        whichProcess.standardError = FileHandle.nullDevice
-        
-        do {
-            try whichProcess.run()
-            whichProcess.waitUntilExit()
-            
-            let data = pipe.fileHandleForReading.readDataToEndOfFile()
-            if let output = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines),
-               !output.isEmpty {
-                ffmpegPath = output
-                ffmpegFound = true
-                print("Found ffmpeg via which: \(output)")
-                return
-            }
-        } catch {
-            print("Failed to locate ffmpeg with 'which' command: \(error)")
-        }
-        
-        print("Warning: ffmpeg not found in any common locations")
-        ffmpegFound = false
-        ffmpegPath = "/opt/homebrew/bin/ffmpeg" // Default fallback
+    func toggleWebcamOverlay() {
+        webcamOverlayEnabled.toggle()
     }
     
-    private func detectScreenCaptureDevice() {
-        guard let ffmpegPath = ffmpegPath else {
-            print("Cannot detect screen capture device: ffmpeg not found")
-            return
+    private func setupWebcamCapture() -> Bool {
+        guard webcamOverlayEnabled else { return false }
+        
+        // Find the camera device
+        guard let camera = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .unspecified) else {
+            print("No camera device found")
+            return false
         }
         
-        let deviceProcess = Process()
-        deviceProcess.executableURL = URL(fileURLWithPath: ffmpegPath)
-        deviceProcess.arguments = ["-f", "avfoundation", "-list_devices", "true", "-i", ""]
-        
-        let pipe = Pipe()
-        deviceProcess.standardError = pipe
-        deviceProcess.standardOutput = FileHandle.nullDevice
-        
         do {
-            try deviceProcess.run()
-            deviceProcess.waitUntilExit()
+            // Create capture session
+            captureSession = AVCaptureSession()
+            captureSession?.sessionPreset = .vga640x480
             
-            let data = pipe.fileHandleForReading.readDataToEndOfFile()
-            if let output = String(data: data, encoding: .utf8) {
-                screenCaptureDeviceIndex = parseScreenCaptureDevice(from: output)
-                print("Detected screen capture device index: \(screenCaptureDeviceIndex ?? -1)")
+            // Create input
+            webcamInput = try AVCaptureDeviceInput(device: camera)
+            guard let webcamInput = webcamInput,
+                  let captureSession = captureSession,
+                  captureSession.canAddInput(webcamInput) else {
+                print("Cannot add webcam input")
+                return false
             }
+            captureSession.addInput(webcamInput)
+            
+            // Create output
+            webcamOutput = AVCaptureVideoDataOutput()
+            guard let webcamOutput = webcamOutput,
+                  captureSession.canAddOutput(webcamOutput) else {
+                print("Cannot add webcam output")
+                return false
+            }
+            
+            webcamOutput.videoSettings = [
+                kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA
+            ]
+            
+            let queue = DispatchQueue(label: "webcam.capture.queue")
+            webcamOutput.setSampleBufferDelegate(self, queue: queue)
+            captureSession.addOutput(webcamOutput)
+            
+            return true
         } catch {
-            print("Failed to detect screen capture device: \(error)")
-            // Fallback to common device index
-            screenCaptureDeviceIndex = 2
+            print("Failed to setup webcam capture: \(error)")
+            return false
         }
     }
     
-    private func parseScreenCaptureDevice(from output: String) -> Int? {
-        let lines = output.components(separatedBy: .newlines)
+    private func startWebcamRecording(outputURL: URL) -> Bool {
+        guard let captureSession = captureSession else { return false }
         
-        for line in lines {
-            // Look for lines like "[2] Capture screen 0"
-            if line.contains("Capture screen") || line.contains("capture screen") {
-                // Extract the device index from [X] format
-                let pattern = #"\[(\d+)\]"#
-                if let regex = try? NSRegularExpression(pattern: pattern),
-                   let match = regex.firstMatch(in: line, range: NSRange(line.startIndex..., in: line)),
-                   let range = Range(match.range(at: 1), in: line) {
-                    if let deviceIndex = Int(line[range]) {
-                        return deviceIndex
-                    }
-                }
+        // Create temporary file for webcam recording
+        let tempDir = FileManager.default.temporaryDirectory
+        webcamTempURL = tempDir.appendingPathComponent("webcam_\(UUID().uuidString).mov")
+        
+        guard let webcamTempURL = webcamTempURL else { return false }
+        
+        do {
+            // Create asset writer
+            webcamVideoWriter = try AVAssetWriter(outputURL: webcamTempURL, fileType: .mov)
+            
+            let videoSettings: [String: Any] = [
+                AVVideoCodecKey: AVVideoCodecType.h264,
+                AVVideoWidthKey: 320,
+                AVVideoHeightKey: 240,
+                AVVideoCompressionPropertiesKey: [
+                    AVVideoAverageBitRateKey: 1000000
+                ]
+            ]
+            
+            webcamVideoWriterInput = AVAssetWriterInput(mediaType: .video, outputSettings: videoSettings)
+            webcamVideoWriterInput?.expectsMediaDataInRealTime = true
+            
+            guard let webcamVideoWriterInput = webcamVideoWriterInput,
+                  let webcamVideoWriter = webcamVideoWriter,
+                  webcamVideoWriter.canAdd(webcamVideoWriterInput) else {
+                print("Cannot add webcam video writer input")
+                return false
             }
+            
+            webcamVideoWriter.add(webcamVideoWriterInput)
+            
+            // Start the asset writer immediately
+            webcamVideoWriter.startWriting()
+            webcamSessionStarted = false
+            
+            // Start capture session
+            DispatchQueue.global(qos: .userInitiated).async {
+                captureSession.startRunning()
+            }
+            
+            return true
+        } catch {
+            print("Failed to start webcam recording: \(error)")
+            return false
         }
+    }
+    
+    private func stopWebcamRecording() {
+        captureSession?.stopRunning()
         
-        return nil
+        // Only mark as finished if the writer is in writing state
+        if let writer = webcamVideoWriter, writer.status == .writing {
+            webcamVideoWriterInput?.markAsFinished()
+            writer.finishWriting {
+                print("Webcam recording finished")
+            }
+        } else {
+            print("Webcam writer not in writing state, skipping finishWriting")
+        }
+    }
+    
+    private func cleanupWebcamCapture() {
+        captureSession?.stopRunning()
+        captureSession = nil
+        webcamInput = nil
+        webcamOutput = nil
+        webcamVideoWriter = nil
+        webcamVideoWriterInput = nil
+        webcamSessionStarted = false
+        
+        // Clean up temp file
+        if let webcamTempURL = webcamTempURL {
+            try? FileManager.default.removeItem(at: webcamTempURL)
+            self.webcamTempURL = nil
+        }
     }
     
     func startRecording() {
@@ -143,23 +182,7 @@ class ScreenRecordingManager: NSObject, ObservableObject {
             return
         }
         
-        // Ensure we have detected a screen capture device
-        var deviceIndex = screenCaptureDeviceIndex
-        if deviceIndex == nil {
-            print("No screen capture device detected. Attempting to re-detect...")
-            detectScreenCaptureDevice()
-            deviceIndex = screenCaptureDeviceIndex
-            guard let finalIndex = deviceIndex else {
-                print("Failed to detect screen capture device")
-                return
-            }
-            print("Re-detection successful, using device index: \(finalIndex)")
-        }
-        
-        guard let finalDeviceIndex = deviceIndex else {
-            print("Failed to get device index")
-            return
-        }
+        // screencapture doesn't need device index detection
         
         let documentsPath = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
         let recordingsDir = documentsPath.appendingPathComponent("Kiroku Recordings")
@@ -174,27 +197,35 @@ class ScreenRecordingManager: NSObject, ObservableObject {
         
         guard let url = currentRecordingURL else { return }
         
-        guard let ffmpegPath = ffmpegPath else {
-            print("Cannot start recording: ffmpeg not found")
-            return
+        recordingProcess = Process()
+        recordingProcess?.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
+        
+        var arguments: [String]
+        
+        print("Webcam overlay enabled: \(webcamOverlayEnabled)")
+        
+        if webcamOverlayEnabled {
+            // Setup webcam capture for later composition
+            if setupWebcamCapture() {
+                print("Setting up webcam overlay recording")
+                if !startWebcamRecording(outputURL: url) {
+                    print("Failed to start webcam recording, falling back to screen-only")
+                    cleanupWebcamCapture()
+                }
+            } else {
+                print("Failed to setup webcam capture, falling back to screen-only")
+            }
         }
         
-        recordingProcess = Process()
-        recordingProcess?.executableURL = URL(fileURLWithPath: ffmpegPath)
-        // Use ffmpeg to capture screen with avfoundation
-        recordingProcess?.arguments = [
-            "-f", "avfoundation",
-            "-capture_cursor", "1", // Enable cursor capture
-            "-i", "\(finalDeviceIndex):none",  // Use detected device index, no audio
-            "-r", "30", // 30 fps
-            "-vcodec", "libx264",
-            "-preset", "ultrafast",
-            "-crf", "18",
-            "-y", // Overwrite output file without asking
+        // screencapture arguments: -v for video recording (unlimited time)
+        arguments = [
+            "-v", // Video recording mode
             url.path
         ]
         
-        // Capture stderr to see ffmpeg errors
+        recordingProcess?.arguments = arguments
+        
+        // Capture stderr to see screencapture errors
         let pipe = Pipe()
         recordingProcess?.standardError = pipe
         recordingProcess?.standardOutput = FileHandle.nullDevice
@@ -205,20 +236,51 @@ class ScreenRecordingManager: NSObject, ObservableObject {
             // Read any error output
             let data = pipe.fileHandleForReading.readDataToEndOfFile()
             if let errorOutput = String(data: data, encoding: .utf8), !errorOutput.isEmpty {
-                print("FFmpeg error output: \(errorOutput)")
+                print("screencapture error output: \(errorOutput)")
             }
             
             DispatchQueue.main.async {
-                self?.isRecording = false
                 if let url = self?.currentRecordingURL {
                     print("Checking for recording file at: \(url.path)")
                     DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
                         if FileManager.default.fileExists(atPath: url.path) {
-                            print("Recording file found, adding to list")
-                            self?.recordings.append(url)
-                            self?.saveRecordings()
+                            let fileSize = (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? Int64) ?? 0
+                            print("Recording file found with size: \(fileSize) bytes")
+                            
+                            // Only process if file has content
+                            if fileSize > 0 {
+                                // If webcam overlay was enabled, composite the videos
+                                if self?.webcamOverlayEnabled == true, let webcamURL = self?.webcamTempURL {
+                                    print("Starting video composition...")
+                                    self?.compositeVideos(screenURL: url, webcamURL: webcamURL) { [weak self] compositeURL in
+                                        if let compositeURL = compositeURL {
+                                            // Replace the screen recording with the composite
+                                            try? FileManager.default.removeItem(at: url)
+                                            try? FileManager.default.moveItem(at: compositeURL, to: url)
+                                            print("Video composition completed")
+                                        } else {
+                                            print("Video composition failed")
+                                        }
+                                        
+                                        // Add to recordings list
+                                        self?.recordings.append(url)
+                                        self?.saveRecordings()
+                                        self?.cleanupWebcamCapture()
+                                    }
+                                } else {
+                                    // Standard recording without webcam
+                                    print("Adding recording to list (no webcam)")
+                                    self?.recordings.append(url)
+                                    self?.saveRecordings()
+                                }
+                            } else {
+                                print("Recording file is empty, not adding to list")
+                                try? FileManager.default.removeItem(at: url)
+                                self?.cleanupWebcamCapture()
+                            }
                         } else {
                             print("Recording file not found at expected location")
+                            self?.cleanupWebcamCapture()
                         }
                     }
                 }
@@ -229,9 +291,26 @@ class ScreenRecordingManager: NSObject, ObservableObject {
         
         do {
             print("Starting recording to: \(url.path)")
+            print("screencapture command: /usr/sbin/screencapture \(arguments.joined(separator: " "))")
             try recordingProcess?.run()
             isRecording = true
             print("Recording started successfully")
+            
+            // Check if process is actually running after a moment
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+                if let process = self.recordingProcess {
+                    print("screencapture process running status: \(process.isRunning)")
+                    print("screencapture process ID: \(process.processIdentifier)")
+                    
+                    // Check if file has been created yet
+                    if FileManager.default.fileExists(atPath: url.path) {
+                        let fileSize = (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? Int64) ?? 0
+                        print("Recording file exists with size: \(fileSize) bytes")
+                    } else {
+                        print("Recording file not yet created")
+                    }
+                }
+            }
         } catch {
             print("Failed to start recording: \(error)")
             recordingProcess = nil
@@ -239,8 +318,25 @@ class ScreenRecordingManager: NSObject, ObservableObject {
     }
     
     func stopRecording() {
-        guard isRecording, let process = recordingProcess else { return }
-        process.terminate()
+        guard isRecording else { return }
+        
+        print("Stopping recording...")
+        
+        // Stop webcam recording if active
+        if webcamOverlayEnabled && captureSession?.isRunning == true {
+            print("Stopping webcam recording...")
+            stopWebcamRecording()
+        }
+        
+        // Send SIGINT (Ctrl+C) to screencapture for graceful shutdown
+        if let process = recordingProcess {
+            print("Sending SIGINT to screencapture process...")
+            process.interrupt()
+        }
+        
+        // Update state immediately to prevent UI lag
+        isRecording = false
+        print("Recording state updated to false")
     }
     
     private func loadRecordings() {
@@ -295,8 +391,24 @@ class ScreenRecordingManager: NSObject, ObservableObject {
     }
     
     func exportAsGIF(_ url: URL, completion: @escaping (Result<URL, Error>) -> Void) {
+        // Try to find FFmpeg for GIF conversion
+        let possiblePaths = [
+            "/opt/homebrew/bin/ffmpeg",    // Apple Silicon Homebrew
+            "/usr/local/bin/ffmpeg",       // Intel Homebrew
+            "/usr/bin/ffmpeg",             // System install
+            "/opt/local/bin/ffmpeg"        // MacPorts
+        ]
+        
+        var ffmpegPath: String?
+        for path in possiblePaths {
+            if FileManager.default.fileExists(atPath: path) {
+                ffmpegPath = path
+                break
+            }
+        }
+        
         guard let ffmpegPath = ffmpegPath else {
-            completion(.failure(NSError(domain: "FFmpegNotFound", code: 1, userInfo: [NSLocalizedDescriptionKey: "FFmpeg not found"])))
+            completion(.failure(NSError(domain: "FFmpegNotFound", code: 1, userInfo: [NSLocalizedDescriptionKey: "FFmpeg not found - needed for GIF export"])))
             return
         }
         
@@ -400,6 +512,91 @@ class ScreenRecordingManager: NSObject, ObservableObject {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                 dummyPlayer.replaceCurrentItem(with: nil)
             }
+        }
+    }
+    
+    private func compositeVideos(screenURL: URL, webcamURL: URL, completion: @escaping (URL?) -> Void) {
+        // Try to find FFmpeg for video composition
+        let possiblePaths = [
+            "/opt/homebrew/bin/ffmpeg",    // Apple Silicon Homebrew
+            "/usr/local/bin/ffmpeg",       // Intel Homebrew
+            "/usr/bin/ffmpeg",             // System install
+            "/opt/local/bin/ffmpeg"        // MacPorts
+        ]
+        
+        var ffmpegPath: String?
+        for path in possiblePaths {
+            if FileManager.default.fileExists(atPath: path) {
+                ffmpegPath = path
+                break
+            }
+        }
+        
+        guard let ffmpegPath = ffmpegPath else {
+            completion(nil)
+            return
+        }
+        
+        let documentsPath = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        let recordingsDir = documentsPath.appendingPathComponent("Kiroku Recordings")
+        let compositeURL = recordingsDir.appendingPathComponent("composite_\(UUID().uuidString).mov")
+        
+        let compositeProcess = Process()
+        compositeProcess.executableURL = URL(fileURLWithPath: ffmpegPath)
+        compositeProcess.arguments = [
+            "-i", screenURL.path,
+            "-i", webcamURL.path,
+            "-filter_complex", "[1:v]scale=320:240[webcam];[0:v][webcam]overlay=20:20",
+            "-c:v", "libx264",
+            "-preset", "ultrafast",
+            "-crf", "18",
+            "-y",
+            compositeURL.path
+        ]
+        
+        compositeProcess.terminationHandler = { process in
+            DispatchQueue.main.async {
+                if process.terminationStatus == 0 {
+                    print("Video composition successful")
+                    completion(compositeURL)
+                } else {
+                    print("Video composition failed")
+                    completion(nil)
+                }
+            }
+        }
+        
+        do {
+            try compositeProcess.run()
+        } catch {
+            print("Failed to start video composition: \(error)")
+            completion(nil)
+        }
+    }
+}
+
+// MARK: - AVCaptureVideoDataOutputSampleBufferDelegate
+extension ScreenRecordingManager: AVCaptureVideoDataOutputSampleBufferDelegate {
+    func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
+        guard let webcamVideoWriterInput = webcamVideoWriterInput,
+              let writer = webcamVideoWriter,
+              webcamVideoWriterInput.isReadyForMoreMediaData else {
+            return
+        }
+        
+        // Start the session with the first frame if writer is ready but session hasn't started
+        if writer.status == .writing {
+            let startTime = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
+            
+            // Start session with first frame if not already started
+            if !webcamSessionStarted {
+                writer.startSession(atSourceTime: startTime)
+                webcamSessionStarted = true
+                print("Started webcam recording session")
+            }
+            
+            // Append the sample buffer
+            webcamVideoWriterInput.append(sampleBuffer)
         }
     }
 }

@@ -15,7 +15,10 @@ class ScreenRecordingManager: NSObject, ObservableObject {
     @Published var isRecording = false
     @Published var recordings: [URL] = []
     @Published var hasPermission = false
+    @Published var hasMicrophonePermission = false
     @Published var webcamOverlayEnabled = false
+    @Published var microphoneEnabled = false
+    @Published var audioOffset: Double = 3.0  // Audio offset in seconds
     
     private var recordingProcess: Process?
     private var currentRecordingURL: URL?
@@ -33,6 +36,7 @@ class ScreenRecordingManager: NSObject, ObservableObject {
         super.init()
         loadRecordings()
         checkPermission()
+        checkMicrophonePermission()
         warmUpAVFoundation()
     }
     
@@ -40,8 +44,28 @@ class ScreenRecordingManager: NSObject, ObservableObject {
         hasPermission = hasScreenRecordingPermission()
     }
     
+    func checkMicrophonePermission() {
+        hasMicrophonePermission = hasMicrophoneAccess()
+    }
+    
     func toggleWebcamOverlay() {
         webcamOverlayEnabled.toggle()
+    }
+    
+    func toggleMicrophone() {
+        microphoneEnabled.toggle()
+        
+        // Request microphone permission if needed
+        if microphoneEnabled && !hasMicrophonePermission {
+            requestMicrophonePermission { [weak self] granted in
+                DispatchQueue.main.async {
+                    self?.hasMicrophonePermission = granted
+                    if !granted {
+                        self?.microphoneEnabled = false
+                    }
+                }
+            }
+        }
     }
     
     private func setupWebcamCapture() -> Bool {
@@ -182,6 +206,16 @@ class ScreenRecordingManager: NSObject, ObservableObject {
             return
         }
         
+        // Check microphone permission if microphone is enabled
+        if microphoneEnabled {
+            checkMicrophonePermission()
+            if !hasMicrophonePermission {
+                print("Microphone permission not granted but microphone recording is enabled")
+                // Continue without microphone recording
+                microphoneEnabled = false
+            }
+        }
+        
         // screencapture doesn't need device index detection
         
         let documentsPath = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
@@ -218,10 +252,18 @@ class ScreenRecordingManager: NSObject, ObservableObject {
         }
         
         // screencapture arguments: -v for video recording (unlimited time)
-        arguments = [
-            "-v", // Video recording mode
-            url.path
-        ]
+        if microphoneEnabled && hasMicrophonePermission {
+            arguments = [
+                "-v", // Video recording mode
+                "-g", // Capture audio using default input
+                url.path
+            ]
+        } else {
+            arguments = [
+                "-v", // Video recording mode
+                url.path
+            ]
+        }
         
         recordingProcess?.arguments = arguments
         
@@ -268,8 +310,8 @@ class ScreenRecordingManager: NSObject, ObservableObject {
                                         self?.cleanupWebcamCapture()
                                     }
                                 } else {
-                                    // Standard recording without webcam
-                                    print("Adding recording to list (no webcam)")
+                                    // Standard recording
+                                    print("Adding recording to list")
                                     self?.recordings.append(url)
                                     self?.saveRecordings()
                                 }
@@ -390,6 +432,24 @@ class ScreenRecordingManager: NSObject, ObservableObject {
         NSWorkspace.shared.open(url)
     }
     
+    private func hasMicrophoneAccess() -> Bool {
+        switch AVCaptureDevice.authorizationStatus(for: .audio) {
+        case .authorized:
+            return true
+        case .notDetermined, .denied, .restricted:
+            return false
+        @unknown default:
+            return false
+        }
+    }
+    
+    private func requestMicrophonePermission(completion: @escaping (Bool) -> Void) {
+        AVCaptureDevice.requestAccess(for: .audio) { granted in
+            completion(granted)
+        }
+    }
+    
+    
     func exportAsGIF(_ url: URL, completion: @escaping (Result<URL, Error>) -> Void) {
         // Try to find FFmpeg for GIF conversion
         let possiblePaths = [
@@ -419,12 +479,17 @@ class ScreenRecordingManager: NSObject, ObservableObject {
         
         let exportProcess = Process()
         exportProcess.executableURL = URL(fileURLWithPath: ffmpegPath)
-        exportProcess.arguments = [
+        
+        // Apply audio offset if the source has audio
+        var paletteArgs = [
             "-i", url.path,
             "-vf", "fps=15,scale=640:-1:flags=lanczos,palettegen=reserve_transparent=0",
             "-y",
             gifURL.path.replacingOccurrences(of: ".gif", with: "_palette.png")
         ]
+        
+        // For audio offset, we apply it during the final GIF creation step
+        exportProcess.arguments = paletteArgs
         
         let pipe = Pipe()
         exportProcess.standardError = pipe

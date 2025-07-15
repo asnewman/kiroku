@@ -40,6 +40,15 @@ struct ContentView: View {
                             Text("Overlay Webcam")
                         }
                     }
+                    
+                    Button(action: {
+                        recordingManager.toggleMicrophone()
+                    }) {
+                        HStack {
+                            Image(systemName: recordingManager.microphoneEnabled ? "checkmark" : "")
+                            Text("Record Audio")
+                        }
+                    }
                 } label: {
                     Image(systemName: "gearshape")
                         .foregroundColor(.secondary)

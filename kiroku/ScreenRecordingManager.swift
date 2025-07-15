@@ -56,7 +56,7 @@ class ScreenRecordingManager: NSObject, ObservableObject {
         do {
             // Create capture session
             captureSession = AVCaptureSession()
-            captureSession?.sessionPreset = .hd1280x720
+            captureSession?.sessionPreset = .vga640x480
             
             // Create input
             webcamInput = try AVCaptureDeviceInput(device: camera)
@@ -546,7 +546,7 @@ class ScreenRecordingManager: NSObject, ObservableObject {
         compositeProcess.arguments = [
             "-i", screenURL.path,
             "-i", webcamURL.path,
-            "-filter_complex", "[1:v]scale=300:300:force_original_aspect_ratio=increase,crop=300:300[webcam];[0:v][webcam]overlay=20:main_h-overlay_h-20",
+            "-filter_complex", "[1:v]scale=500:400,crop=300:300:(iw-ow)/2:(ih-oh)/2,format=rgba,geq=r='r(X,Y)':g='g(X,Y)':b='b(X,Y)':a='if(lt(hypot(X-150,Y-150),150),255,0)'[webcam];[0:v][webcam]overlay=20:main_h-overlay_h-20",
             "-c:v", "libx264",
             "-preset", "ultrafast",
             "-crf", "18",

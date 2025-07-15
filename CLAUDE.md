@@ -7,16 +7,18 @@ Kiroku is a simple macOS menubar app for screen recording. It provides an easy w
 
 ### Core Components
 - **kirokuApp.swift**: Main app entry point with NSApplicationDelegate for menubar functionality
-- **ContentView.swift**: SwiftUI interface with recording controls and past recordings list
-- **ScreenRecordingManager.swift**: Core recording logic using FFmpeg with AVFoundation
+- **ContentView.swift**: SwiftUI interface with recording controls, configure dropdown, and past recordings list
+- **ScreenRecordingManager.swift**: Core recording logic using native screencapture with optional webcam overlay
 - **VideoTrimmerView.swift**: Video trimming interface with AVPlayerView and interactive scrubber
-- **kiroku.entitlements**: macOS permissions for screen recording and file access
+- **kiroku.entitlements**: macOS permissions for screen recording, camera, and file access
+- **Info.plist**: Privacy descriptions for camera usage
 
 ### Technical Implementation
-- **Screen Recording**: Uses FFmpeg with AVFoundation input (`-f avfoundation -i X:none`) 
-- **Device Detection**: Dynamically detects screen capture device index by parsing `ffmpeg -list_devices` output
-- **FFmpeg Discovery**: Supports multiple installation paths (Homebrew, MacPorts, system install)
-- **Permission Handling**: Uses `CGPreflightScreenCaptureAccess()` for proper macOS screen recording permissions
+- **Screen Recording**: Uses native macOS `screencapture -v` command for reliable recording
+- **Webcam Overlay**: AVFoundation-based webcam capture with FFmpeg video composition
+- **Hybrid Architecture**: Parent process handles webcam capture to avoid permission issues
+- **FFmpeg Discovery**: Supports multiple installation paths (Homebrew, MacPorts, system install) for GIF export and video composition
+- **Permission Handling**: Uses `CGPreflightScreenCaptureAccess()` for screen recording and camera permissions
 - **File Management**: Saves recordings to `~/Documents/Kiroku Recordings/` with timestamp naming
 - **Video Trimming**: AVPlayer-based preview with interactive scrubber and FFmpeg trimming backend
 - **GIF Export**: Two-pass FFmpeg conversion with palette generation for optimal quality
@@ -25,41 +27,45 @@ Kiroku is a simple macOS menubar app for screen recording. It provides an easy w
 
 ### Key Features
 - Menubar-only interface (no dock icon)
-- Dynamic screen device detection for cross-machine compatibility
-- FFmpeg installation detection with user guidance
+- Configure dropdown with webcam overlay toggle
+- Optional webcam overlay positioned in corner of screen recordings
+- Native screencapture backend for maximum compatibility
 - Past recordings list with open/delete/trim functionality
 - Video trimming with interactive scrubber and draggable start/end handles
 - GIF export with high-quality palette generation
 - Copy to clipboard support for both video and GIF files
 - Dropdown menu interface for recording actions
-- Proper macOS permission flow
+- Proper macOS permission flow for both screen recording and camera
 - Cursor capture in screen recordings
 
 ## Development Notes
 
 ### Dependencies
-- FFmpeg (external dependency, auto-detected at runtime)
-- AVFoundation and AVKit for video playback and trimming
+- FFmpeg (external dependency, auto-detected at runtime for GIF export and video composition)
+- AVFoundation and AVKit for video playback, trimming, and webcam capture
 - macOS 10.15+ for screen recording APIs
 - No sandboxing (disabled for external process execution)
 
 ### Build Requirements
 - Xcode with SwiftUI support
-- Screen recording entitlements configured
+- Screen recording and camera entitlements configured
+- Custom Info.plist with NSCameraUsageDescription
 - No additional frameworks beyond system libraries
 
 ### Testing Considerations
 - Test on different Mac models (varying camera/display configurations)
 - Verify FFmpeg detection across installation methods
-- Test permission flows and error states
-- Validate recording quality and file output
+- Test permission flows for both screen recording and camera access
+- Validate recording quality and file output with and without webcam overlay
 - Test video trimming across app sessions and different video formats
 - Verify QuickTime compatibility of trimmed videos
+- Test webcam overlay positioning and composition quality
 
 ## Codebase Patterns
 - ObservableObject pattern for state management
-- Process execution for external FFmpeg calls
-- SwiftUI declarative UI with conditional states
+- Process execution for native screencapture and FFmpeg composition
+- SwiftUI declarative UI with conditional states and configure dropdown
 - Item-based sheet presentation for robust state management
 - KVO observers for AVPlayer state tracking
+- AVCaptureVideoDataOutputSampleBufferDelegate for webcam frame processing
 - Proper error handling and user feedback

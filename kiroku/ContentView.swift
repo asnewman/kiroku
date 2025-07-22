@@ -16,6 +16,7 @@ struct VideoTrimItem: Identifiable {
 
 struct ContentView: View {
     @StateObject private var recordingManager = ScreenRecordingManager()
+    @StateObject private var webcamPreviewManager = WebcamPreviewManager()
     @State private var showingTrimmer = false
     @State private var selectedVideoURL: URL? // Store the selected URL
     @State private var trimmerKey = UUID() // Force view recreation
@@ -34,6 +35,11 @@ struct ContentView: View {
                 Menu {
                     Button(action: {
                         recordingManager.toggleWebcamOverlay()
+                        if recordingManager.webcamOverlayEnabled {
+                            webcamPreviewManager.showPreview()
+                        } else {
+                            webcamPreviewManager.hidePreview()
+                        }
                     }) {
                         HStack {
                             Image(systemName: recordingManager.webcamOverlayEnabled ? "checkmark" : "")
@@ -94,7 +100,11 @@ struct ContentView: View {
                     Button(action: {
                         if recordingManager.isRecording {
                             recordingManager.stopRecording()
+                            if recordingManager.webcamOverlayEnabled {
+                                webcamPreviewManager.showPreview()
+                            }
                         } else {
+                            webcamPreviewManager.hidePreview()
                             recordingManager.startRecording()
                         }
                     }) {

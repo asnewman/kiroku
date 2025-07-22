@@ -11,7 +11,7 @@ import AppKit
 import CoreGraphics
 import CoreVideo
 
-class ScreenRecordingManager: NSObject, ObservableObject {
+class ScreenRecordingManager: ObservableObject {
     @Published var isRecording = false
     @Published var recordings: [URL] = []
     @Published var hasPermission = false
@@ -23,21 +23,10 @@ class ScreenRecordingManager: NSObject, ObservableObject {
     private var recordingProcess: Process?
     private var currentRecordingURL: URL?
     
-    // AVFoundation for webcam capture
-    private var captureSession: AVCaptureSession?
-    private var webcamInput: AVCaptureDeviceInput?
-    private var webcamOutput: AVCaptureVideoDataOutput?
-    private var webcamVideoWriter: AVAssetWriter?
-    private var webcamVideoWriterInput: AVAssetWriterInput?
-    private var webcamTempURL: URL?
-    private var webcamSessionStarted = false
-    
-    override init() {
-        super.init()
+    init() {
         loadRecordings()
         checkPermission()
         checkMicrophonePermission()
-        warmUpAVFoundation()
     }
     
     func checkPermission() {
@@ -68,132 +57,9 @@ class ScreenRecordingManager: NSObject, ObservableObject {
         }
     }
     
-    private func setupWebcamCapture() -> Bool {
-        guard webcamOverlayEnabled else { return false }
-        
-        // Find the camera device
-        guard let camera = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .unspecified) else {
-            print("No camera device found")
-            return false
-        }
-        
-        do {
-            // Create capture session
-            captureSession = AVCaptureSession()
-            captureSession?.sessionPreset = .vga640x480
-            
-            // Create input
-            webcamInput = try AVCaptureDeviceInput(device: camera)
-            guard let webcamInput = webcamInput,
-                  let captureSession = captureSession,
-                  captureSession.canAddInput(webcamInput) else {
-                print("Cannot add webcam input")
-                return false
-            }
-            captureSession.addInput(webcamInput)
-            
-            // Create output
-            webcamOutput = AVCaptureVideoDataOutput()
-            guard let webcamOutput = webcamOutput,
-                  captureSession.canAddOutput(webcamOutput) else {
-                print("Cannot add webcam output")
-                return false
-            }
-            
-            webcamOutput.videoSettings = [
-                kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA
-            ]
-            
-            let queue = DispatchQueue(label: "webcam.capture.queue")
-            webcamOutput.setSampleBufferDelegate(self, queue: queue)
-            captureSession.addOutput(webcamOutput)
-            
-            return true
-        } catch {
-            print("Failed to setup webcam capture: \(error)")
-            return false
-        }
-    }
     
-    private func startWebcamRecording(outputURL: URL) -> Bool {
-        guard let captureSession = captureSession else { return false }
-        
-        // Create temporary file for webcam recording
-        let tempDir = FileManager.default.temporaryDirectory
-        webcamTempURL = tempDir.appendingPathComponent("webcam_\(UUID().uuidString).mov")
-        
-        guard let webcamTempURL = webcamTempURL else { return false }
-        
-        do {
-            // Create asset writer
-            webcamVideoWriter = try AVAssetWriter(outputURL: webcamTempURL, fileType: .mov)
-            
-            let videoSettings: [String: Any] = [
-                AVVideoCodecKey: AVVideoCodecType.h264,
-                AVVideoWidthKey: 300,
-                AVVideoHeightKey: 300,
-                AVVideoCompressionPropertiesKey: [
-                    AVVideoAverageBitRateKey: 1000000
-                ]
-            ]
-            
-            webcamVideoWriterInput = AVAssetWriterInput(mediaType: .video, outputSettings: videoSettings)
-            webcamVideoWriterInput?.expectsMediaDataInRealTime = true
-            
-            guard let webcamVideoWriterInput = webcamVideoWriterInput,
-                  let webcamVideoWriter = webcamVideoWriter,
-                  webcamVideoWriter.canAdd(webcamVideoWriterInput) else {
-                print("Cannot add webcam video writer input")
-                return false
-            }
-            
-            webcamVideoWriter.add(webcamVideoWriterInput)
-            
-            // Start the asset writer immediately
-            webcamVideoWriter.startWriting()
-            webcamSessionStarted = false
-            
-            // Start capture session
-            DispatchQueue.global(qos: .userInitiated).async {
-                captureSession.startRunning()
-            }
-            
-            return true
-        } catch {
-            print("Failed to start webcam recording: \(error)")
-            return false
-        }
-    }
     
-    private func stopWebcamRecording() {
-        captureSession?.stopRunning()
-        
-        // Only mark as finished if the writer is in writing state
-        if let writer = webcamVideoWriter, writer.status == .writing {
-            webcamVideoWriterInput?.markAsFinished()
-            writer.finishWriting {
-                print("Webcam recording finished")
-            }
-        } else {
-            print("Webcam writer not in writing state, skipping finishWriting")
-        }
-    }
     
-    private func cleanupWebcamCapture() {
-        captureSession?.stopRunning()
-        captureSession = nil
-        webcamInput = nil
-        webcamOutput = nil
-        webcamVideoWriter = nil
-        webcamVideoWriterInput = nil
-        webcamSessionStarted = false
-        
-        // Clean up temp file
-        if let webcamTempURL = webcamTempURL {
-            try? FileManager.default.removeItem(at: webcamTempURL)
-            self.webcamTempURL = nil
-        }
-    }
     
     func startRecording() {
         guard !isRecording else { return }
@@ -236,20 +102,6 @@ class ScreenRecordingManager: NSObject, ObservableObject {
         
         var arguments: [String]
         
-        print("Webcam overlay enabled: \(webcamOverlayEnabled)")
-        
-        if webcamOverlayEnabled {
-            // Setup webcam capture for later composition
-            if setupWebcamCapture() {
-                print("Setting up webcam overlay recording")
-                if !startWebcamRecording(outputURL: url) {
-                    print("Failed to start webcam recording, falling back to screen-only")
-                    cleanupWebcamCapture()
-                }
-            } else {
-                print("Failed to setup webcam capture, falling back to screen-only")
-            }
-        }
         
         // screencapture arguments: -v for video recording (unlimited time)
         if microphoneEnabled && hasMicrophonePermission {
@@ -291,38 +143,16 @@ class ScreenRecordingManager: NSObject, ObservableObject {
                             
                             // Only process if file has content
                             if fileSize > 0 {
-                                // If webcam overlay was enabled, composite the videos
-                                if self?.webcamOverlayEnabled == true, let webcamURL = self?.webcamTempURL {
-                                    print("Starting video composition...")
-                                    self?.compositeVideos(screenURL: url, webcamURL: webcamURL) { [weak self] compositeURL in
-                                        if let compositeURL = compositeURL {
-                                            // Replace the screen recording with the composite
-                                            try? FileManager.default.removeItem(at: url)
-                                            try? FileManager.default.moveItem(at: compositeURL, to: url)
-                                            print("Video composition completed")
-                                        } else {
-                                            print("Video composition failed")
-                                        }
-                                        
-                                        // Add to recordings list
-                                        self?.recordings.append(url)
-                                        self?.saveRecordings()
-                                        self?.cleanupWebcamCapture()
-                                    }
-                                } else {
-                                    // Standard recording
-                                    print("Adding recording to list")
-                                    self?.recordings.append(url)
-                                    self?.saveRecordings()
-                                }
+                                // Standard recording
+                                print("Adding recording to list")
+                                self?.recordings.append(url)
+                                self?.saveRecordings()
                             } else {
                                 print("Recording file is empty, not adding to list")
                                 try? FileManager.default.removeItem(at: url)
-                                self?.cleanupWebcamCapture()
                             }
                         } else {
                             print("Recording file not found at expected location")
-                            self?.cleanupWebcamCapture()
                         }
                     }
                 }
@@ -364,11 +194,6 @@ class ScreenRecordingManager: NSObject, ObservableObject {
         
         print("Stopping recording...")
         
-        // Stop webcam recording if active
-        if webcamOverlayEnabled && captureSession?.isRunning == true {
-            print("Stopping webcam recording...")
-            stopWebcamRecording()
-        }
         
         // Send SIGINT (Ctrl+C) to screencapture for graceful shutdown
         if let process = recordingProcess {
@@ -563,105 +388,4 @@ class ScreenRecordingManager: NSObject, ObservableObject {
         }
     }
     
-    private func warmUpAVFoundation() {
-        // Create a dummy player to initialize AVFoundation frameworks
-        let dummyPlayer = AVPlayer()
-        
-        // Try to load an existing recording if available to warm up local file handling
-        if let firstRecording = recordings.first {
-            let asset = AVURLAsset(url: firstRecording)
-            let playerItem = AVPlayerItem(asset: asset)
-            dummyPlayer.replaceCurrentItem(with: playerItem)
-            
-            // Quick cleanup
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                dummyPlayer.replaceCurrentItem(with: nil)
-            }
-        }
-    }
-    
-    private func compositeVideos(screenURL: URL, webcamURL: URL, completion: @escaping (URL?) -> Void) {
-        // Try to find FFmpeg for video composition
-        let possiblePaths = [
-            "/opt/homebrew/bin/ffmpeg",    // Apple Silicon Homebrew
-            "/usr/local/bin/ffmpeg",       // Intel Homebrew
-            "/usr/bin/ffmpeg",             // System install
-            "/opt/local/bin/ffmpeg"        // MacPorts
-        ]
-        
-        var ffmpegPath: String?
-        for path in possiblePaths {
-            if FileManager.default.fileExists(atPath: path) {
-                ffmpegPath = path
-                break
-            }
-        }
-        
-        guard let ffmpegPath = ffmpegPath else {
-            completion(nil)
-            return
-        }
-        
-        let documentsPath = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-        let recordingsDir = documentsPath.appendingPathComponent("Kiroku Recordings")
-        let compositeURL = recordingsDir.appendingPathComponent("composite_\(UUID().uuidString).mov")
-        
-        let compositeProcess = Process()
-        compositeProcess.executableURL = URL(fileURLWithPath: ffmpegPath)
-        compositeProcess.arguments = [
-            "-i", screenURL.path,
-            "-i", webcamURL.path,
-            "-filter_complex", "[1:v]scale=500:400,crop=300:300:(iw-ow)/2:(ih-oh)/2,format=rgba,geq=r='r(X,Y)':g='g(X,Y)':b='b(X,Y)':a='if(lt(hypot(X-150,Y-150),150),255,0)'[webcam];[0:v][webcam]overlay=20:main_h-overlay_h-20",
-            "-c:v", "libx264",
-            "-preset", "ultrafast",
-            "-crf", "18",
-            "-y",
-            compositeURL.path
-        ]
-        
-        compositeProcess.terminationHandler = { process in
-            DispatchQueue.main.async {
-                if process.terminationStatus == 0 {
-                    print("Video composition successful")
-                    completion(compositeURL)
-                } else {
-                    print("Video composition failed")
-                    completion(nil)
-                }
-            }
-        }
-        
-        do {
-            try compositeProcess.run()
-        } catch {
-            print("Failed to start video composition: \(error)")
-            completion(nil)
-        }
-    }
-}
-
-// MARK: - AVCaptureVideoDataOutputSampleBufferDelegate
-extension ScreenRecordingManager: AVCaptureVideoDataOutputSampleBufferDelegate {
-    func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
-        guard let webcamVideoWriterInput = webcamVideoWriterInput,
-              let writer = webcamVideoWriter,
-              webcamVideoWriterInput.isReadyForMoreMediaData else {
-            return
-        }
-        
-        // Start the session with the first frame if writer is ready but session hasn't started
-        if writer.status == .writing {
-            let startTime = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
-            
-            // Start session with first frame if not already started
-            if !webcamSessionStarted {
-                writer.startSession(atSourceTime: startTime)
-                webcamSessionStarted = true
-                print("Started webcam recording session")
-            }
-            
-            // Append the sample buffer
-            webcamVideoWriterInput.append(sampleBuffer)
-        }
-    }
 }

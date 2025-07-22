@@ -53,6 +53,7 @@ class ScreenRecordingManager: ObservableObject {
         webcamCornerPosition = position
     }
     
+    
     func toggleMicrophone() {
         microphoneEnabled.toggle()
         
@@ -112,22 +113,16 @@ class ScreenRecordingManager: ObservableObject {
         recordingProcess = Process()
         recordingProcess?.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
         
-        var arguments: [String]
+        var arguments: [String] = ["-v"] // Video recording mode
         
-        
-        // screencapture arguments: -v for video recording (unlimited time)
+        // Add microphone audio if enabled
         if microphoneEnabled && hasMicrophonePermission {
-            arguments = [
-                "-v", // Video recording mode
-                "-g", // Capture audio using default input
-                url.path
-            ]
-        } else {
-            arguments = [
-                "-v", // Video recording mode
-                url.path
-            ]
+            arguments.append("-g") // Capture audio using default input
         }
+        
+        
+        // Add output file path
+        arguments.append(url.path)
         
         recordingProcess?.arguments = arguments
         
@@ -318,7 +313,7 @@ class ScreenRecordingManager: ObservableObject {
         exportProcess.executableURL = URL(fileURLWithPath: ffmpegPath)
         
         // Apply audio offset if the source has audio
-        var paletteArgs = [
+        let paletteArgs = [
             "-i", url.path,
             "-vf", "fps=15,scale=640:-1:flags=lanczos,palettegen=reserve_transparent=0",
             "-y",

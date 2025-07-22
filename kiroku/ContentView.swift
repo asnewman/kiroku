@@ -75,6 +75,7 @@ struct ContentView: View {
                             Text("Record Audio")
                         }
                     }
+                    
                 } label: {
                     Image(systemName: "gearshape")
                         .foregroundColor(.secondary)

@@ -22,6 +22,10 @@ struct VideoTrimmerView: View {
     @State private var isPlaying = false
     @State private var isTrimming = false
     @State private var trimError: String?
+    @State private var cropEnabled = false
+    @State private var cropRect: CGRect = .zero
+    @State private var videoSize: CGSize = .zero
+    @State private var actualVideoSize: CGSize = .zero
     
     init(videoURL: URL, onTrimComplete: @escaping (URL) -> Void, onCancel: @escaping () -> Void) {
         self.videoURL = videoURL
@@ -48,6 +52,26 @@ struct VideoTrimmerView: View {
                 
                 Spacer()
                 
+                HStack(spacing: 8) {
+                    Button(cropEnabled ? "Crop ON" : "Crop OFF") {
+                        cropEnabled.toggle()
+                        if !cropEnabled {
+                            cropRect = .zero
+                        }
+                    }
+                    .buttonStyle(.bordered)
+                    .foregroundColor(cropEnabled ? .green : .secondary)
+                    
+                    if cropEnabled && cropRect != .zero {
+                        Button("Reset") {
+                            cropRect = .zero
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                        .foregroundColor(.secondary)
+                    }
+                }
+                
                 Button("Save Trim") {
                     trimVideo()
                 }
@@ -59,9 +83,22 @@ struct VideoTrimmerView: View {
             // Video Player
             Group {
                 if duration > 0 {
-                    VideoPlayer(player: player)
-                        .frame(height: 300)
-                        .cornerRadius(8)
+                    ZStack {
+                        VideoPlayer(player: player)
+                            .frame(height: 300)
+                            .cornerRadius(8)
+                        
+                        if cropEnabled {
+                            CropOverlay(
+                                cropRect: $cropRect,
+                                videoSize: $videoSize,
+                                frameSize: CGSize(width: 400, height: 300),
+                                actualVideoSize: actualVideoSize
+                            )
+                            .frame(height: 300)
+                            .cornerRadius(8)
+                        }
+                    }
                 } else {
                     VStack(spacing: 12) {
                         ProgressView()
@@ -289,6 +326,22 @@ struct VideoTrimmerView: View {
             }
             self.isPlaying = isPlaying
         }
+        
+        // Get actual video dimensions
+        Task {
+            do {
+                let asset = AVURLAsset(url: videoURL)
+                let tracks = try await asset.loadTracks(withMediaType: .video)
+                if let videoTrack = tracks.first {
+                    let naturalSize = try await videoTrack.load(.naturalSize)
+                    await MainActor.run {
+                        self.actualVideoSize = naturalSize
+                    }
+                }
+            } catch {
+                print("Failed to get video dimensions: \(error)")
+            }
+        }
     }
     
     private func togglePlayback() {
@@ -322,7 +375,10 @@ struct VideoTrimmerView: View {
                 let trimmedURL = try await VideoTrimmer.trimVideo(
                     inputURL: videoURL,
                     startTime: startTime,
-                    endTime: endTime
+                    endTime: endTime,
+                    cropRect: cropEnabled ? cropRect : nil,
+                    overlayFrameSize: CGSize(width: 400, height: 300),
+                    actualVideoSize: actualVideoSize
                 )
                 
                 await MainActor.run {
@@ -341,26 +397,30 @@ struct VideoTrimmerView: View {
 
 // Helper class for video trimming operations
 class VideoTrimmer {
-    static func trimVideo(inputURL: URL, startTime: Double, endTime: Double) async throws -> URL {
+    static func trimVideo(inputURL: URL, startTime: Double, endTime: Double, cropRect: CGRect? = nil, overlayFrameSize: CGSize = .zero, actualVideoSize: CGSize = .zero) async throws -> URL {
         // Create output URL
         let documentsPath = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
         let recordingsDir = documentsPath.appendingPathComponent("Kiroku Recordings")
         
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyy-MM-dd HH.mm.ss"
-        let trimmedFilename = "Trimmed - \(formatter.string(from: Date())).mov"
+        let baseFilename = cropRect != nil ? "Trimmed+Cropped" : "Trimmed"
+        let trimmedFilename = "\(baseFilename) - \(formatter.string(from: Date())).mov"
         let outputURL = recordingsDir.appendingPathComponent(trimmedFilename)
         
-        // Use FFmpeg for trimming
+        // Use FFmpeg for trimming and cropping
         return try await trimWithFFmpeg(
             inputURL: inputURL,
             outputURL: outputURL,
             startTime: startTime,
-            duration: endTime - startTime
+            duration: endTime - startTime,
+            cropRect: cropRect,
+            overlayFrameSize: overlayFrameSize,
+            actualVideoSize: actualVideoSize
         )
     }
     
-    private static func trimWithFFmpeg(inputURL: URL, outputURL: URL, startTime: Double, duration: Double) async throws -> URL {
+    private static func trimWithFFmpeg(inputURL: URL, outputURL: URL, startTime: Double, duration: Double, cropRect: CGRect? = nil, overlayFrameSize: CGSize = .zero, actualVideoSize: CGSize = .zero) async throws -> URL {
         return try await withCheckedThrowingContinuation { continuation in
             // Find FFmpeg path (reuse logic from ScreenRecordingManager)
             guard let ffmpegPath = findFFmpegPath() else {
@@ -370,10 +430,39 @@ class VideoTrimmer {
             
             let process = Process()
             process.executableURL = URL(fileURLWithPath: ffmpegPath)
-            process.arguments = [
+            
+            var arguments = [
                 "-i", inputURL.path,
                 "-ss", String(format: "%.2f", startTime),
-                "-t", String(format: "%.2f", duration),
+                "-t", String(format: "%.2f", duration)
+            ]
+            
+            // Add crop filter if cropping is enabled
+            if let cropRect = cropRect, cropRect != .zero, overlayFrameSize != .zero, actualVideoSize != .zero {
+                // Scale crop coordinates from overlay frame to actual video dimensions
+                let scaleX = actualVideoSize.width / overlayFrameSize.width
+                let scaleY = actualVideoSize.height / overlayFrameSize.height
+                
+                let scaledX = Int(cropRect.origin.x * scaleX)
+                let scaledY = Int(cropRect.origin.y * scaleY)
+                let scaledWidth = Int(cropRect.width * scaleX)
+                let scaledHeight = Int(cropRect.height * scaleY)
+                
+                // Ensure crop dimensions are within video bounds and even numbers (required by H.264)
+                let finalX = max(0, min(scaledX, Int(actualVideoSize.width) - 2))
+                let finalY = max(0, min(scaledY, Int(actualVideoSize.height) - 2))
+                let finalWidth = max(2, min(scaledWidth, Int(actualVideoSize.width) - finalX))
+                let finalHeight = max(2, min(scaledHeight, Int(actualVideoSize.height) - finalY))
+                
+                // Make width and height even (required by H.264 encoder)
+                let evenWidth = finalWidth - (finalWidth % 2)
+                let evenHeight = finalHeight - (finalHeight % 2)
+                
+                let cropFilter = "crop=\(evenWidth):\(evenHeight):\(finalX):\(finalY)"
+                arguments.append(contentsOf: ["-vf", cropFilter])
+            }
+            
+            arguments.append(contentsOf: [
                 "-c:v", "libx264", // Re-encode video for compatibility
                 "-c:a", "aac", // Re-encode audio for compatibility
                 "-preset", "medium", // Balance between speed and quality
@@ -382,7 +471,9 @@ class VideoTrimmer {
                 "-avoid_negative_ts", "make_zero",
                 "-y", // Overwrite output file
                 outputURL.path
-            ]
+            ])
+            
+            process.arguments = arguments
             
             let pipe = Pipe()
             process.standardError = pipe
@@ -443,6 +534,116 @@ class VideoTrimmer {
         }
         
         return nil
+    }
+}
+
+struct CropOverlay: View {
+    @Binding var cropRect: CGRect
+    @Binding var videoSize: CGSize
+    let frameSize: CGSize
+    let actualVideoSize: CGSize
+    
+    @State private var isDragging = false
+    @State private var dragStart: CGPoint = .zero
+    
+    var body: some View {
+        GeometryReader { geometry in
+            ZStack {
+                // Semi-transparent overlay
+                Color.black.opacity(0.3)
+                
+                // Crop rectangle
+                if cropRect != .zero {
+                    Rectangle()
+                        .fill(Color.clear)
+                        .border(Color.white, width: 2)
+                        .frame(width: cropRect.width, height: cropRect.height)
+                        .position(
+                            x: cropRect.midX,
+                            y: cropRect.midY
+                        )
+                        .blendMode(.destinationOut)
+                }
+                
+                // Crop info
+                if cropRect != .zero {
+                    VStack {
+                        VStack(spacing: 2) {
+                            Text("Overlay: \(Int(cropRect.width)) × \(Int(cropRect.height))")
+                                .font(.caption2)
+                                .foregroundColor(.white)
+                            
+                            if actualVideoSize != .zero {
+                                let scaleX = actualVideoSize.width / frameSize.width
+                                let scaleY = actualVideoSize.height / frameSize.height
+                                let actualWidth = Int(cropRect.width * scaleX)
+                                let actualHeight = Int(cropRect.height * scaleY)
+                                Text("Video: \(actualWidth) × \(actualHeight)")
+                                    .font(.caption2)
+                                    .foregroundColor(.yellow)
+                            }
+                        }
+                        .padding(6)
+                        .background(Color.black.opacity(0.8))
+                        .cornerRadius(4)
+                        
+                        Spacer()
+                    }
+                    .padding(.top, 8)
+                }
+                
+                if cropRect == .zero {
+                    VStack {
+                        Text("Click and drag to select crop area")
+                            .font(.caption)
+                            .foregroundColor(.white)
+                            .padding(8)
+                            .background(Color.black.opacity(0.7))
+                            .cornerRadius(4)
+                        Spacer()
+                    }
+                    .padding(.top, 8)
+                }
+            }
+            .contentShape(Rectangle())
+            .gesture(
+                DragGesture()
+                    .onChanged { value in
+                        if !isDragging {
+                            isDragging = true
+                            dragStart = value.startLocation
+                        }
+                        
+                        let currentPoint = value.location
+                        let x = min(dragStart.x, currentPoint.x)
+                        let y = min(dragStart.y, currentPoint.y)
+                        let width = abs(currentPoint.x - dragStart.x)
+                        let height = abs(currentPoint.y - dragStart.y)
+                        
+                        cropRect = CGRect(x: x, y: y, width: width, height: height)
+                    }
+                    .onEnded { _ in
+                        isDragging = false
+                        
+                        // Ensure minimum crop size
+                        if cropRect.width < 50 || cropRect.height < 50 {
+                            cropRect = .zero
+                        }
+                    }
+            )
+        }
+        .compositingGroup()
+        .onAppear {
+            // Initialize with a default crop if none exists
+            if cropRect == .zero {
+                cropRect = CGRect(
+                    x: frameSize.width * 0.1,
+                    y: frameSize.height * 0.1,
+                    width: frameSize.width * 0.8,
+                    height: frameSize.height * 0.8
+                )
+            }
+        }
     }
 }
 

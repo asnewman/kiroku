@@ -7,7 +7,7 @@ class WebcamPreviewWindow: NSWindow {
     private var previewLayer: AVCaptureVideoPreviewLayer?
     
     init() {
-        let windowSize = NSSize(width: 200, height: 150)
+        let windowSize = NSSize(width: 200, height: 200)
         let screenFrame = NSScreen.main?.frame ?? .zero
         let origin = NSPoint(
             x: screenFrame.maxX - windowSize.width - 20,
@@ -59,7 +59,10 @@ class WebcamPreviewWindow: NSWindow {
             
             // Create circular mask
             let maskLayer = CAShapeLayer()
-            let path = CGPath(ellipseIn: contentView.bounds, transform: nil)
+            let diameter = min(contentView.bounds.width, contentView.bounds.height)
+            let radius = diameter / 2
+            let center = CGPoint(x: contentView.bounds.midX, y: contentView.bounds.midY)
+            let path = CGPath(ellipseIn: CGRect(x: center.x - radius, y: center.y - radius, width: diameter, height: diameter), transform: nil)
             maskLayer.path = path
             
             contentView.layer?.mask = maskLayer

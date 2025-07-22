@@ -11,6 +11,13 @@ import AppKit
 import CoreGraphics
 import CoreVideo
 
+enum WebcamCornerPosition: String, CaseIterable {
+    case bottomRight = "Bottom Right"
+    case bottomLeft = "Bottom Left"
+    case topRight = "Top Right"
+    case topLeft = "Top Left"
+}
+
 class ScreenRecordingManager: ObservableObject {
     @Published var isRecording = false
     @Published var recordings: [URL] = []
@@ -18,6 +25,7 @@ class ScreenRecordingManager: ObservableObject {
     @Published var hasMicrophonePermission = false
     @Published var webcamOverlayEnabled = false
     @Published var microphoneEnabled = false
+    @Published var webcamCornerPosition: WebcamCornerPosition = .bottomRight
     @Published var audioOffset: Double = 3.0  // Audio offset in seconds
     
     private var recordingProcess: Process?
@@ -39,6 +47,10 @@ class ScreenRecordingManager: ObservableObject {
     
     func toggleWebcamOverlay() {
         webcamOverlayEnabled.toggle()
+    }
+    
+    func setWebcamCornerPosition(_ position: WebcamCornerPosition) {
+        webcamCornerPosition = position
     }
     
     func toggleMicrophone() {

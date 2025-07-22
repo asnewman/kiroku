@@ -6,13 +6,10 @@ class WebcamPreviewWindow: NSWindow {
     private var captureSession: AVCaptureSession?
     private var previewLayer: AVCaptureVideoPreviewLayer?
     
-    init() {
+    init(position: WebcamCornerPosition = .bottomRight) {
         let windowSize = NSSize(width: 200, height: 200)
         let screenFrame = NSScreen.main?.frame ?? .zero
-        let origin = NSPoint(
-            x: screenFrame.maxX - windowSize.width - 20,
-            y: screenFrame.minY + 20
-        )
+        let origin = Self.calculateOrigin(for: position, windowSize: windowSize, screenFrame: screenFrame)
         
         super.init(
             contentRect: NSRect(origin: origin, size: windowSize),
@@ -88,19 +85,63 @@ class WebcamPreviewWindow: NSWindow {
     deinit {
         captureSession?.stopRunning()
     }
+    
+    func updatePosition(_ position: WebcamCornerPosition) {
+        let windowSize = NSSize(width: 200, height: 200)
+        let screenFrame = NSScreen.main?.frame ?? .zero
+        let origin = Self.calculateOrigin(for: position, windowSize: windowSize, screenFrame: screenFrame)
+        self.setFrameOrigin(origin)
+    }
+    
+    private static func calculateOrigin(for position: WebcamCornerPosition, windowSize: NSSize, screenFrame: NSRect) -> NSPoint {
+        let padding: CGFloat = 20
+        
+        switch position {
+        case .bottomRight:
+            return NSPoint(
+                x: screenFrame.maxX - windowSize.width - padding,
+                y: screenFrame.minY + padding
+            )
+        case .bottomLeft:
+            return NSPoint(
+                x: screenFrame.minX + padding,
+                y: screenFrame.minY + padding
+            )
+        case .topRight:
+            return NSPoint(
+                x: screenFrame.maxX - windowSize.width - padding,
+                y: screenFrame.maxY - windowSize.height - padding
+            )
+        case .topLeft:
+            return NSPoint(
+                x: screenFrame.minX + padding,
+                y: screenFrame.maxY - windowSize.height - padding
+            )
+        }
+    }
 }
 
 class WebcamPreviewManager: ObservableObject {
     private var window: WebcamPreviewWindow?
+    private var currentPosition: WebcamCornerPosition = .bottomRight
     
-    func showPreview() {
+    func showPreview(at position: WebcamCornerPosition = .bottomRight) {
         if window == nil {
-            window = WebcamPreviewWindow()
+            window = WebcamPreviewWindow(position: position)
+            currentPosition = position
+        } else if currentPosition != position {
+            window?.updatePosition(position)
+            currentPosition = position
         }
         window?.startPreview()
     }
     
     func hidePreview() {
         window?.stopPreview()
+    }
+    
+    func updatePosition(_ position: WebcamCornerPosition) {
+        currentPosition = position
+        window?.updatePosition(position)
     }
 }

@@ -36,7 +36,7 @@ struct ContentView: View {
                     Button(action: {
                         recordingManager.toggleWebcamOverlay()
                         if recordingManager.webcamOverlayEnabled {
-                            webcamPreviewManager.showPreview()
+                            webcamPreviewManager.showPreview(at: recordingManager.webcamCornerPosition)
                         } else {
                             webcamPreviewManager.hidePreview()
                         }
@@ -45,6 +45,26 @@ struct ContentView: View {
                             Image(systemName: recordingManager.webcamOverlayEnabled ? "checkmark" : "")
                             Text("Overlay Webcam")
                         }
+                    }
+                    
+                    if recordingManager.webcamOverlayEnabled {
+                        Divider()
+                        
+                        Menu("Webcam Position") {
+                            ForEach(WebcamCornerPosition.allCases, id: \.self) { position in
+                                Button(action: {
+                                    recordingManager.setWebcamCornerPosition(position)
+                                    webcamPreviewManager.updatePosition(position)
+                                }) {
+                                    HStack {
+                                        Image(systemName: recordingManager.webcamCornerPosition == position ? "checkmark" : "")
+                                        Text(position.rawValue)
+                                    }
+                                }
+                            }
+                        }
+                        
+                        Divider()
                     }
                     
                     Button(action: {
@@ -101,7 +121,7 @@ struct ContentView: View {
                         if recordingManager.isRecording {
                             recordingManager.stopRecording()
                             if recordingManager.webcamOverlayEnabled {
-                                webcamPreviewManager.showPreview()
+                                webcamPreviewManager.showPreview(at: recordingManager.webcamCornerPosition)
                             }
                         } else {
                             webcamPreviewManager.hidePreview()

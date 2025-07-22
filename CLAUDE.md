@@ -31,6 +31,7 @@ Kiroku is a simple macOS menubar app for screen recording. It provides an easy w
 - Menubar-only interface (no dock icon)
 - Configure dropdown with webcam overlay and audio recording toggles
 - Optional webcam overlay shown as floating preview window during recording
+- Configurable webcam position (all four corners: top-left, top-right, bottom-left, bottom-right)
 - Optional microphone audio recording with configurable offset for sync
 - Native screencapture backend for maximum compatibility
 - Past recordings list with open/delete/trim functionality
@@ -63,7 +64,8 @@ Kiroku is a simple macOS menubar app for screen recording. It provides an easy w
 - Test audio/video sync with different offset values
 - Test video trimming across app sessions and different video formats
 - Verify QuickTime compatibility of trimmed videos
-- Test webcam preview window positioning and appearance
+- Test webcam preview window positioning in all four corners
+- Validate webcam position changes during active preview
 - Validate microphone audio capture quality and sync
 
 ## Codebase Patterns

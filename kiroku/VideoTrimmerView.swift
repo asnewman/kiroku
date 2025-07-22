@@ -549,28 +549,55 @@ struct CropOverlay: View {
     var body: some View {
         GeometryReader { geometry in
             ZStack {
-                // Semi-transparent overlay
-                Color.black.opacity(0.3)
+                // Darker semi-transparent overlay
+                Color.black.opacity(0.6)
                 
-                // Crop rectangle
+                // Crop rectangle with enhanced visibility
                 if cropRect != .zero {
-                    Rectangle()
-                        .fill(Color.clear)
-                        .border(Color.white, width: 2)
-                        .frame(width: cropRect.width, height: cropRect.height)
-                        .position(
-                            x: cropRect.midX,
-                            y: cropRect.midY
-                        )
-                        .blendMode(.destinationOut)
+                    ZStack {
+                        // Clear area for the crop
+                        Rectangle()
+                            .fill(Color.clear)
+                            .frame(width: cropRect.width, height: cropRect.height)
+                            .position(x: cropRect.midX, y: cropRect.midY)
+                            .blendMode(.destinationOut)
+                        
+                        // Bright border with shadow for better visibility
+                        Rectangle()
+                            .stroke(Color.cyan, lineWidth: 3)
+                            .background(
+                                Rectangle()
+                                    .stroke(Color.black, lineWidth: 1)
+                                    .offset(x: 1, y: 1)
+                            )
+                            .frame(width: cropRect.width, height: cropRect.height)
+                            .position(x: cropRect.midX, y: cropRect.midY)
+                        
+                        // Corner handles for better visual feedback
+                        ForEach(0..<4) { index in
+                            let corners = [
+                                CGPoint(x: cropRect.minX, y: cropRect.minY), // Top-left
+                                CGPoint(x: cropRect.maxX, y: cropRect.minY), // Top-right
+                                CGPoint(x: cropRect.minX, y: cropRect.maxY), // Bottom-left
+                                CGPoint(x: cropRect.maxX, y: cropRect.maxY)  // Bottom-right
+                            ]
+                            
+                            Circle()
+                                .fill(Color.cyan)
+                                .stroke(Color.white, lineWidth: 2)
+                                .frame(width: 10, height: 10)
+                                .position(corners[index])
+                        }
+                    }
                 }
                 
-                // Crop info
+                // Crop info with enhanced visibility
                 if cropRect != .zero {
                     VStack {
-                        VStack(spacing: 2) {
+                        VStack(spacing: 3) {
                             Text("Overlay: \(Int(cropRect.width)) × \(Int(cropRect.height))")
-                                .font(.caption2)
+                                .font(.caption)
+                                .fontWeight(.semibold)
                                 .foregroundColor(.white)
                             
                             if actualVideoSize != .zero {
@@ -579,30 +606,47 @@ struct CropOverlay: View {
                                 let actualWidth = Int(cropRect.width * scaleX)
                                 let actualHeight = Int(cropRect.height * scaleY)
                                 Text("Video: \(actualWidth) × \(actualHeight)")
-                                    .font(.caption2)
-                                    .foregroundColor(.yellow)
+                                    .font(.caption)
+                                    .fontWeight(.semibold)
+                                    .foregroundColor(.cyan)
                             }
                         }
-                        .padding(6)
-                        .background(Color.black.opacity(0.8))
-                        .cornerRadius(4)
+                        .padding(8)
+                        .background(Color.black.opacity(0.9))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 6)
+                                .stroke(Color.cyan, lineWidth: 1)
+                        )
+                        .cornerRadius(6)
                         
                         Spacer()
                     }
-                    .padding(.top, 8)
+                    .padding(.top, 12)
                 }
                 
                 if cropRect == .zero {
                     VStack {
-                        Text("Click and drag to select crop area")
-                            .font(.caption)
-                            .foregroundColor(.white)
-                            .padding(8)
-                            .background(Color.black.opacity(0.7))
-                            .cornerRadius(4)
+                        VStack(spacing: 4) {
+                            Image(systemName: "crop")
+                                .font(.title2)
+                                .foregroundColor(.cyan)
+                            Text("Click and drag to select crop area")
+                                .font(.caption)
+                                .fontWeight(.medium)
+                                .foregroundColor(.white)
+                                .multilineTextAlignment(.center)
+                        }
+                        .padding(12)
+                        .background(Color.black.opacity(0.9))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 8)
+                                .stroke(Color.cyan.opacity(0.5), lineWidth: 2)
+                        )
+                        .cornerRadius(8)
+                        
                         Spacer()
                     }
-                    .padding(.top, 8)
+                    .padding(.top, 20)
                 }
             }
             .contentShape(Rectangle())

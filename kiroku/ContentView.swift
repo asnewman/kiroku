@@ -321,7 +321,7 @@ struct RecordingRow: View {
                 Menu {
                     if !isGIF {
                         Button(action: onTrim) {
-                            Label("Trim", systemImage: "scissors")
+                            Label("Edit", systemImage: "scissors")
                         }
                         
                         Button(action: onExportGIF) {

@@ -16,7 +16,6 @@ struct VideoTrimItem: Identifiable {
 
 struct ContentView: View {
     @StateObject private var recordingManager = ScreenRecordingManager()
-    @StateObject private var webcamPreviewManager = WebcamPreviewManager()
     @State private var showingTrimmer = false
     @State private var selectedVideoURL: URL? // Store the selected URL
     @State private var trimmerKey = UUID() // Force view recreation
@@ -30,61 +29,6 @@ struct ContentView: View {
                 Text("Kiroku")
                     .font(.headline)
                 Spacer()
-                
-                // Configure dropdown
-                Menu {
-                    Button(action: {
-                        recordingManager.toggleWebcamOverlay()
-                        if recordingManager.webcamOverlayEnabled {
-                            webcamPreviewManager.showPreview(at: recordingManager.webcamCornerPosition)
-                        } else {
-                            webcamPreviewManager.hidePreview()
-                        }
-                    }) {
-                        HStack {
-                            Image(systemName: recordingManager.webcamOverlayEnabled ? "checkmark" : "")
-                            Text("Overlay Webcam")
-                        }
-                    }
-                    
-                    if recordingManager.webcamOverlayEnabled {
-                        Divider()
-                        
-                        Menu("Webcam Position") {
-                            ForEach(WebcamCornerPosition.allCases, id: \.self) { position in
-                                Button(action: {
-                                    recordingManager.setWebcamCornerPosition(position)
-                                    webcamPreviewManager.updatePosition(position)
-                                }) {
-                                    HStack {
-                                        Image(systemName: recordingManager.webcamCornerPosition == position ? "checkmark" : "")
-                                        Text(position.rawValue)
-                                    }
-                                }
-                            }
-                        }
-                        
-                        Divider()
-                    }
-                    
-                    Button(action: {
-                        recordingManager.toggleMicrophone()
-                    }) {
-                        HStack {
-                            Image(systemName: recordingManager.microphoneEnabled ? "checkmark" : "")
-                            Text("Record Audio")
-                        }
-                    }
-                    
-                } label: {
-                    Image(systemName: "gearshape")
-                        .foregroundColor(.secondary)
-                        .font(.system(size: 16))
-                }
-                .buttonStyle(.plain)
-                .help("Configure recording settings")
-                .menuStyle(.borderlessButton)
-                .menuIndicator(.hidden)
             }
             .padding(.horizontal)
             .padding(.top)
@@ -93,7 +37,7 @@ struct ContentView: View {
             VStack(spacing: 12) {
                 if !recordingManager.hasPermission {
                     Button(action: {
-                        recordingManager.startRecording() // This will open System Preferences
+                        recordingManager.requestScreenRecordingPermission()
                     }) {
                         HStack {
                             Image(systemName: "exclamationmark.triangle")
@@ -119,37 +63,41 @@ struct ContentView: View {
                     .buttonStyle(.bordered)
                 } else {
                     Button(action: {
-                        if recordingManager.isRecording {
-                            recordingManager.stopRecording()
-                            if recordingManager.webcamOverlayEnabled {
-                                webcamPreviewManager.showPreview(at: recordingManager.webcamCornerPosition)
-                            }
-                        } else {
-                            webcamPreviewManager.hidePreview()
-                            recordingManager.startRecording()
-                        }
+                        recordingManager.exportLast2Minutes()
                     }) {
                         HStack {
-                            Image(systemName: recordingManager.isRecording ? "stop.circle.fill" : "record.circle")
-                                .foregroundColor(recordingManager.isRecording ? .red : .blue)
-                            Text(recordingManager.isRecording ? "Stop Recording" : "Start Recording")
+                            if recordingManager.isExporting {
+                                ProgressView()
+                                    .scaleEffect(0.8)
+                                    .progressViewStyle(CircularProgressViewStyle())
+                                Text("Exporting...")
+                            } else {
+                                Image(systemName: "clock.arrow.circlepath")
+                                    .foregroundColor(.blue)
+                                Text("Save Last 2 Minutes")
+                            }
                         }
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 8)
                     }
                     .buttonStyle(.borderedProminent)
-                    .tint(recordingManager.isRecording ? .red : .blue)
+                    .tint(.blue)
+                    .disabled(recordingManager.isExporting)
                     
-                    if recordingManager.isRecording {
+                    VStack(spacing: 4) {
                         HStack {
                             Circle()
                                 .fill(.red)
                                 .frame(width: 8, height: 8)
                                 .opacity(0.8)
-                            Text("Recording...")
+                            Text("Always Recording")
                                 .font(.caption)
                                 .foregroundColor(.secondary)
                         }
+                        
+                        Text("\(recordingManager.bufferChunks.count) chunks in buffer")
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
                     }
                 }
             }

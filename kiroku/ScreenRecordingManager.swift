@@ -11,120 +11,90 @@ import AppKit
 import CoreGraphics
 import CoreVideo
 
-enum WebcamCornerPosition: String, CaseIterable {
-    case bottomRight = "Bottom Right"
-    case bottomLeft = "Bottom Left"
-    case topRight = "Top Right"
-    case topLeft = "Top Left"
-}
-
 class ScreenRecordingManager: ObservableObject {
-    @Published var isRecording = false
+    @Published var isRecording = true  // Always recording
     @Published var recordings: [URL] = []
     @Published var hasPermission = false
-    @Published var hasMicrophonePermission = false
-    @Published var webcamOverlayEnabled = false
-    @Published var microphoneEnabled = false
-    @Published var webcamCornerPosition: WebcamCornerPosition = .bottomRight
-    @Published var audioOffset: Double = 3.0  // Audio offset in seconds
+    @Published var bufferChunks: [URL] = []  // Rolling buffer of video chunks
+    @Published var isExporting = false  // Track export status
     
     private var recordingProcess: Process?
     private var currentRecordingURL: URL?
+    private var recordingTimer: Timer?
+    private let chunkDuration: TimeInterval = 20.0  // 20 second chunks
+    private let bufferDuration: TimeInterval = 180.0  // 3 minute buffer
+    private var chunkStartTime: Date?
     
     init() {
+        clearBuffer()
         loadRecordings()
         checkPermission()
-        checkMicrophonePermission()
+        
+        // Start continuous recording if we have permission
+        if hasPermission {
+            startContinuousRecording()
+        }
     }
     
     func checkPermission() {
-        hasPermission = hasScreenRecordingPermission()
-    }
-    
-    func checkMicrophonePermission() {
-        hasMicrophonePermission = hasMicrophoneAccess()
-    }
-    
-    func toggleWebcamOverlay() {
-        webcamOverlayEnabled.toggle()
-    }
-    
-    func setWebcamCornerPosition(_ position: WebcamCornerPosition) {
-        webcamCornerPosition = position
-    }
-    
-    
-    func toggleMicrophone() {
-        microphoneEnabled.toggle()
+        let newPermission = hasScreenRecordingPermission()
+        let wasGranted = !hasPermission && newPermission
+        hasPermission = newPermission
         
-        // Request microphone permission if needed
-        if microphoneEnabled && !hasMicrophonePermission {
-            requestMicrophonePermission { [weak self] granted in
-                DispatchQueue.main.async {
-                    self?.hasMicrophonePermission = granted
-                    if !granted {
-                        self?.microphoneEnabled = false
-                    }
-                }
-            }
+        // Start recording if permission was just granted (but not if already recording)
+        if wasGranted && recordingTimer == nil {
+            startContinuousRecording()
         }
     }
     
+    private func startContinuousRecording() {
+        print("startContinuousRecording called, hasPermission: \(hasPermission)")
+        guard hasPermission else { 
+            print("No permission for screen recording")
+            return 
+        }
+        startNextChunk()
+    }
     
-    
-    
-    
-    func startRecording() {
-        guard !isRecording else { return }
+    private func startNextChunk() {
+        print("startNextChunk called")
         
-        // Check for screen recording permission first
-        checkPermission()
-        if !hasPermission {
-            print("Screen recording permission not granted. Opening System Preferences...")
-            openScreenRecordingPreferences()
+        // Don't interrupt if already recording - let chunks run their full duration
+        if recordingProcess != nil && recordingProcess!.isRunning {
+            print("Recording already in progress, skipping")
             return
         }
         
-        // Check microphone permission if microphone is enabled
-        if microphoneEnabled {
-            checkMicrophonePermission()
-            if !hasMicrophonePermission {
-                print("Microphone permission not granted but microphone recording is enabled")
-                // Continue without microphone recording
-                microphoneEnabled = false
-            }
-        }
+        // Clean old chunks outside buffer window
+        cleanOldChunks()
         
-        // screencapture doesn't need device index detection
+        // Start new chunk
+        startRecordingChunk()
         
+        // Next chunk will be started automatically when this one completes
+    }
+    
+    private func startRecordingChunk() {
         let documentsPath = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-        let recordingsDir = documentsPath.appendingPathComponent("Kiroku Recordings")
+        let bufferDir = documentsPath.appendingPathComponent("Kiroku Buffer")
         
-        try? FileManager.default.createDirectory(at: recordingsDir, withIntermediateDirectories: true)
+        try? FileManager.default.createDirectory(at: bufferDir, withIntermediateDirectories: true)
         
         let formatter = DateFormatter()
-        formatter.dateFormat = "yyyy-MM-dd HH.mm.ss"
-        let filename = "Screen Recording \(formatter.string(from: Date())).mov"
+        formatter.dateFormat = "yyyy-MM-dd HH.mm.ss.SSS"
+        let filename = "chunk_\(formatter.string(from: Date())).mov"
         
-        currentRecordingURL = recordingsDir.appendingPathComponent(filename)
+        currentRecordingURL = bufferDir.appendingPathComponent(filename)
+        chunkStartTime = Date()
         
         guard let url = currentRecordingURL else { return }
         
+        print("Starting chunk recording: \(filename)")
+        
         recordingProcess = Process()
         recordingProcess?.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
-        
-        var arguments: [String] = ["-v"] // Video recording mode
-        
-        // Add microphone audio if enabled
-        if microphoneEnabled && hasMicrophonePermission {
-            arguments.append("-g") // Capture audio using default input
-        }
-        
-        
-        // Add output file path
-        arguments.append(url.path)
-        
-        recordingProcess?.arguments = arguments
+        // Use -V flag to set video recording duration in seconds
+        recordingProcess?.arguments = ["-v", "-V", String(Int(chunkDuration)), url.path]
         
         // Capture stderr to see screencapture errors
         let pipe = Pipe()
@@ -132,34 +102,49 @@ class ScreenRecordingManager: ObservableObject {
         recordingProcess?.standardOutput = FileHandle.nullDevice
         
         recordingProcess?.terminationHandler = { [weak self] process in
-            print("Recording process terminated with status: \(process.terminationStatus)")
+            print("🔴 TERMINATION HANDLER CALLED")
+            print("Chunk recording terminated with status: \(process.terminationStatus)")
+            print("Process termination reason: \(process.terminationReason.rawValue)")
             
             // Read any error output
             let data = pipe.fileHandleForReading.readDataToEndOfFile()
             if let errorOutput = String(data: data, encoding: .utf8), !errorOutput.isEmpty {
                 print("screencapture error output: \(errorOutput)")
+            } else {
+                print("No error output from screencapture")
             }
             
             DispatchQueue.main.async {
                 if let url = self?.currentRecordingURL {
-                    print("Checking for recording file at: \(url.path)")
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                    // Wait for the file to be written - timeout should produce a complete file
+                    print("🟡 Waiting 2 seconds for file to be written: \(url.path)")
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+                        print("🟡 Checking file existence after wait...")
                         if FileManager.default.fileExists(atPath: url.path) {
                             let fileSize = (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? Int64) ?? 0
-                            print("Recording file found with size: \(fileSize) bytes")
+                            print("✅ Chunk file \(url.lastPathComponent) size: \(fileSize) bytes")
                             
-                            // Only process if file has content
+                            // Only add to buffer if file has content
                             if fileSize > 0 {
-                                // Standard recording
-                                print("Adding recording to list")
-                                self?.recordings.append(url)
-                                self?.saveRecordings()
+                                self?.bufferChunks.append(url)
+                                print("✅ Added chunk to buffer. Total chunks: \(self?.bufferChunks.count ?? 0)")
+                                print("Buffer contents: \(self?.bufferChunks.map { $0.lastPathComponent } ?? [])")
                             } else {
-                                print("Recording file is empty, not adding to list")
+                                print("❌ Chunk file is empty, removing")
                                 try? FileManager.default.removeItem(at: url)
                             }
                         } else {
-                            print("Recording file not found at expected location")
+                            print("❌ Chunk file does not exist at: \(url.path)")
+                            // List what files do exist in the buffer directory
+                            let bufferDir = url.deletingLastPathComponent()
+                            if let files = try? FileManager.default.contentsOfDirectory(atPath: bufferDir.path) {
+                                print("Files in buffer directory: \(files)")
+                            }
+                        }
+                        
+                        // Start next chunk after processing current one
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                            self?.startNextChunk()
                         }
                     }
                 }
@@ -169,48 +154,214 @@ class ScreenRecordingManager: ObservableObject {
         }
         
         do {
-            print("Starting recording to: \(url.path)")
-            print("screencapture command: /usr/sbin/screencapture \(arguments.joined(separator: " "))")
             try recordingProcess?.run()
-            isRecording = true
-            print("Recording started successfully")
+            print("Chunk recording process started successfully")
             
-            // Check if process is actually running after a moment
-            DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+            // Debug: Check if process is running after a brief delay
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
                 if let process = self.recordingProcess {
-                    print("screencapture process running status: \(process.isRunning)")
-                    print("screencapture process ID: \(process.processIdentifier)")
-                    
-                    // Check if file has been created yet
-                    if FileManager.default.fileExists(atPath: url.path) {
-                        let fileSize = (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? Int64) ?? 0
-                        print("Recording file exists with size: \(fileSize) bytes")
-                    } else {
-                        print("Recording file not yet created")
+                    print("Process status after 1s: isRunning=\(process.isRunning), processID=\(process.processIdentifier)")
+                }
+            }
+            
+            // Debug: Check status after expected duration
+            DispatchQueue.main.asyncAfter(deadline: .now() + chunkDuration + 2.0) {
+                if let process = self.recordingProcess {
+                    print("Process status after \(self.chunkDuration + 2)s: isRunning=\(process.isRunning), terminated=\(process.isRunning ? "no" : "yes")")
+                    if !process.isRunning {
+                        print("Process terminated but handler may not have fired")
                     }
                 }
             }
         } catch {
-            print("Failed to start recording: \(error)")
+            print("Failed to start chunk recording: \(error)")
             recordingProcess = nil
         }
     }
     
-    func stopRecording() {
-        guard isRecording else { return }
-        
-        print("Stopping recording...")
-        
-        
-        // Send SIGINT (Ctrl+C) to screencapture for graceful shutdown
+    private func stopCurrentChunk() {
+        // Send SIGTERM to screencapture for graceful shutdown
         if let process = recordingProcess {
-            print("Sending SIGINT to screencapture process...")
-            process.interrupt()
+            process.terminate()
+        }
+    }
+    
+    private func cleanOldChunks() {
+        let cutoffTime = Date().addingTimeInterval(-bufferDuration)
+        
+        bufferChunks = bufferChunks.filter { url in
+            if let attributes = try? FileManager.default.attributesOfItem(atPath: url.path),
+               let creationDate = attributes[.creationDate] as? Date {
+                if creationDate < cutoffTime {
+                    // Delete old chunk
+                    try? FileManager.default.removeItem(at: url)
+                    return false
+                }
+            }
+            return true
+        }
+    }
+    
+    private func clearBuffer() {
+        print("Clearing buffer directory")
+        
+        // Stop any ongoing recording
+        if recordingProcess != nil {
+            stopCurrentChunk()
         }
         
-        // Update state immediately to prevent UI lag
-        isRecording = false
-        print("Recording state updated to false")
+        // Cancel timer
+        recordingTimer?.invalidate()
+        recordingTimer = nil
+        
+        // Delete all chunks in buffer
+        for url in bufferChunks {
+            try? FileManager.default.removeItem(at: url)
+        }
+        bufferChunks.removeAll()
+        
+        // Also clean the buffer directory
+        let documentsPath = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        let bufferDir = documentsPath.appendingPathComponent("Kiroku Buffer")
+        
+        if FileManager.default.fileExists(atPath: bufferDir.path) {
+            do {
+                let files = try FileManager.default.contentsOfDirectory(at: bufferDir, includingPropertiesForKeys: nil)
+                for file in files {
+                    try? FileManager.default.removeItem(at: file)
+                }
+                print("Cleared \(files.count) files from buffer directory")
+            } catch {
+                print("Error clearing buffer directory: \(error)")
+            }
+        }
+    }
+    
+    func exportLast2Minutes() {
+        guard !isExporting else { return }
+        
+        isExporting = true
+        print("exportLast2Minutes called")
+        let exportDuration: TimeInterval = 120.0  // 2 minutes
+        let cutoffTime = Date().addingTimeInterval(-exportDuration)
+        
+        print("Buffer chunks count: \(bufferChunks.count)")
+        print("Cutoff time: \(cutoffTime)")
+        
+        // Get chunks from last 2 minutes
+        let chunksToExport = bufferChunks.filter { url in
+            if let attributes = try? FileManager.default.attributesOfItem(atPath: url.path),
+               let creationDate = attributes[.creationDate] as? Date {
+                print("Chunk \(url.lastPathComponent) created at: \(creationDate), included: \(creationDate >= cutoffTime)")
+                return creationDate >= cutoffTime
+            }
+            return false
+        }.sorted { url1, url2 in
+            let date1 = (try? FileManager.default.attributesOfItem(atPath: url1.path)[.creationDate] as? Date) ?? Date.distantPast
+            let date2 = (try? FileManager.default.attributesOfItem(atPath: url2.path)[.creationDate] as? Date) ?? Date.distantPast
+            return date1 < date2
+        }
+        
+        print("Chunks to export: \(chunksToExport.count)")
+        
+        guard !chunksToExport.isEmpty else {
+            print("No chunks to export within the last 2 minutes")
+            isExporting = false
+            return
+        }
+        
+        // Merge available chunks (current recording will continue)
+        mergeChunks(chunksToExport)
+    }
+    
+    private func mergeChunks(_ chunks: [URL]) {
+        print("mergeChunks called with \(chunks.count) chunks")
+        
+        guard !chunks.isEmpty else {
+            print("No chunks to merge")
+            return
+        }
+        
+        // Find FFmpeg
+        let possiblePaths = [
+            "/opt/homebrew/bin/ffmpeg",
+            "/usr/local/bin/ffmpeg",
+            "/usr/bin/ffmpeg",
+            "/opt/local/bin/ffmpeg"
+        ]
+        
+        var ffmpegPath: String?
+        for path in possiblePaths {
+            if FileManager.default.fileExists(atPath: path) {
+                ffmpegPath = path
+                break
+            }
+        }
+        
+        guard let ffmpegPath = ffmpegPath else {
+            print("FFmpeg not found - needed for merging chunks")
+            return
+        }
+        
+        let documentsPath = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        let recordingsDir = documentsPath.appendingPathComponent("Kiroku Recordings")
+        try? FileManager.default.createDirectory(at: recordingsDir, withIntermediateDirectories: true)
+        
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd HH.mm.ss"
+        let outputURL = recordingsDir.appendingPathComponent("Recording \(formatter.string(from: Date())).mov")
+        
+        // Create concat list file
+        let listPath = FileManager.default.temporaryDirectory.appendingPathComponent("concat_list.txt")
+        let listContent = chunks.map { "file '\($0.path)'" }.joined(separator: "\n")
+        
+        print("Concat list content:\n\(listContent)")
+        
+        do {
+            try listContent.write(to: listPath, atomically: true, encoding: .utf8)
+            
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: ffmpegPath)
+            process.arguments = [
+                "-f", "concat",
+                "-safe", "0",
+                "-i", listPath.path,
+                "-c", "copy",
+                "-y",
+                outputURL.path
+            ]
+            
+            let pipe = Pipe()
+            process.standardError = pipe
+            process.standardOutput = FileHandle.nullDevice
+            
+            process.terminationHandler = { [weak self] process in
+                print("FFmpeg merge terminated with status: \(process.terminationStatus)")
+                
+                let errorData = pipe.fileHandleForReading.readDataToEndOfFile()
+                if let errorOutput = String(data: errorData, encoding: .utf8), !errorOutput.isEmpty {
+                    print("FFmpeg output: \(errorOutput)")
+                }
+                
+                try? FileManager.default.removeItem(at: listPath)
+                
+                DispatchQueue.main.async {
+                    if process.terminationStatus == 0 {
+                        print("Merge successful, adding to recordings")
+                        self?.recordings.append(outputURL)
+                        self?.saveRecordings()
+                    } else {
+                        print("Merge failed with status: \(process.terminationStatus)")
+                    }
+                    self?.isExporting = false
+                }
+            }
+            
+            try process.run()
+        } catch {
+            print("Failed to merge chunks: \(error)")
+            isExporting = false
+        }
     }
     
     private func loadRecordings() {
@@ -227,6 +378,16 @@ class ScreenRecordingManager: ObservableObject {
             }
         } catch {
             print("Failed to load recordings: \(error)")
+        }
+        
+        // Also load existing buffer chunks on startup
+        let bufferDir = documentsPath.appendingPathComponent("Kiroku Buffer")
+        do {
+            let files = try FileManager.default.contentsOfDirectory(at: bufferDir, includingPropertiesForKeys: nil)
+            bufferChunks = files.filter { $0.pathExtension.lowercased() == "mov" }
+            cleanOldChunks()  // Clean old chunks on startup
+        } catch {
+            // Buffer directory might not exist yet
         }
     }
     
@@ -259,26 +420,13 @@ class ScreenRecordingManager: ObservableObject {
         }
     }
     
+    func requestScreenRecordingPermission() {
+        openScreenRecordingPreferences()
+    }
+    
     private func openScreenRecordingPreferences() {
         let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")!
         NSWorkspace.shared.open(url)
-    }
-    
-    private func hasMicrophoneAccess() -> Bool {
-        switch AVCaptureDevice.authorizationStatus(for: .audio) {
-        case .authorized:
-            return true
-        case .notDetermined, .denied, .restricted:
-            return false
-        @unknown default:
-            return false
-        }
-    }
-    
-    private func requestMicrophonePermission(completion: @escaping (Bool) -> Void) {
-        AVCaptureDevice.requestAccess(for: .audio) { granted in
-            completion(granted)
-        }
     }
     
     

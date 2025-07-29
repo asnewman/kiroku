@@ -21,8 +21,8 @@ class ScreenRecordingManager: ObservableObject {
     private var recordingProcess: Process?
     private var currentRecordingURL: URL?
     private var recordingTimer: Timer?
-    private let chunkDuration: TimeInterval = 20.0  // 20 second chunks
-    private let bufferDuration: TimeInterval = 180.0  // 3 minute buffer
+    private let chunkDuration: TimeInterval = 10.0  // 10 second chunks
+    private let bufferDuration: TimeInterval = 60.0  // 1 minute buffer
     private var chunkStartTime: Date?
     
     init() {
@@ -237,18 +237,18 @@ class ScreenRecordingManager: ObservableObject {
         }
     }
     
-    func exportLast2Minutes() {
+    func exportLast1Minute() {
         guard !isExporting else { return }
         
         isExporting = true
-        print("exportLast2Minutes called")
-        let exportDuration: TimeInterval = 120.0  // 2 minutes
+        print("exportLast1Minute called")
+        let exportDuration: TimeInterval = 60.0  // 1 minute
         let cutoffTime = Date().addingTimeInterval(-exportDuration)
         
         print("Buffer chunks count: \(bufferChunks.count)")
         print("Cutoff time: \(cutoffTime)")
         
-        // Get chunks from last 2 minutes
+        // Get chunks from last 1 minute
         let chunksToExport = bufferChunks.filter { url in
             if let attributes = try? FileManager.default.attributesOfItem(atPath: url.path),
                let creationDate = attributes[.creationDate] as? Date {
@@ -265,7 +265,7 @@ class ScreenRecordingManager: ObservableObject {
         print("Chunks to export: \(chunksToExport.count)")
         
         guard !chunksToExport.isEmpty else {
-            print("No chunks to export within the last 2 minutes")
+            print("No chunks to export within the last 1 minute")
             isExporting = false
             return
         }
@@ -326,7 +326,11 @@ class ScreenRecordingManager: ObservableObject {
                 "-f", "concat",
                 "-safe", "0",
                 "-i", listPath.path,
-                "-c", "copy",
+                "-c:v", "libx264",
+                "-crf", "28",
+                "-preset", "faster",
+                "-c:a", "aac",
+                "-b:a", "128k",
                 "-y",
                 outputURL.path
             ]

@@ -63,7 +63,7 @@ struct ContentView: View {
                     .buttonStyle(.bordered)
                 } else {
                     Button(action: {
-                        recordingManager.exportLast2Minutes()
+                        recordingManager.exportLast1Minute()
                     }) {
                         HStack {
                             if recordingManager.isExporting {
@@ -74,7 +74,7 @@ struct ContentView: View {
                             } else {
                                 Image(systemName: "clock.arrow.circlepath")
                                     .foregroundColor(.blue)
-                                Text("Save Last 2 Minutes")
+                                Text("Save Last 1 Minute")
                             }
                         }
                         .frame(maxWidth: .infinity)

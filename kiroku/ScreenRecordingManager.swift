@@ -22,7 +22,7 @@ class ScreenRecordingManager: ObservableObject {
     private var currentRecordingURL: URL?
     private var recordingTimer: Timer?
     private let chunkDuration: TimeInterval = 10.0  // 10 second chunks
-    private let bufferDuration: TimeInterval = 60.0  // 1 minute buffer
+    private let bufferDuration: TimeInterval = 120.0  // 2 minute buffer
     private var chunkStartTime: Date?
     
     init() {

@@ -1,7 +1,7 @@
 # Kiroku - Project Context
 
 ## Project Overview
-Kiroku is a macOS menubar app for continuous screen recording with a rolling buffer system. It automatically records the screen in 20-second chunks, maintaining a 3-minute buffer, and allows users to export the last 2 minutes of activity on demand.
+Kiroku is a macOS menubar app for continuous screen recording with a rolling buffer system. It automatically records the screen in 10-second chunks, maintaining a 2-minute buffer (to prevent file deletion issues), and allows users to export the last 1 minute of activity on demand.
 
 ## Architecture
 
@@ -14,8 +14,8 @@ Kiroku is a macOS menubar app for continuous screen recording with a rolling buf
 - **Info.plist**: Minimal configuration without camera/microphone privacy descriptions
 
 ### Technical Implementation
-- **Continuous Recording**: Uses `screencapture -v -V 20` for 20-second chunk recording with automatic termination
-- **Rolling Buffer**: Maintains 3-minute buffer by automatically cleaning chunks older than 180 seconds
+- **Continuous Recording**: Uses `screencapture -v -V 10` for 10-second chunk recording with automatic termination
+- **Rolling Buffer**: Maintains 2-minute buffer by automatically cleaning chunks older than 120 seconds
 - **Chunk Management**: Sequential chunk processing with natural process termination using screencapture's built-in timeout
 - **Export Functionality**: FFmpeg concat demuxer for seamless merging of buffer chunks into final recordings
 - **FFmpeg Discovery**: Supports multiple installation paths (Homebrew, MacPorts, system install) for video processing
@@ -30,7 +30,7 @@ Kiroku is a macOS menubar app for continuous screen recording with a rolling buf
 ### Key Features
 - Menubar-only interface (no dock icon)
 - Always-recording mode with visual indicator and chunk count display
-- "Save Last 2 Minutes" export functionality with progress indication
+- "Save Last 1 Minute" export functionality with progress indication
 - Automatic buffer clearing on app startup for fresh sessions
 - Rolling buffer management with automatic cleanup of old chunks
 - Past recordings list with open/delete/trim functionality

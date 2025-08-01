@@ -5,13 +5,34 @@ Kiroku is a macOS menubar app for continuous screen recording with a rolling buf
 
 ## Architecture
 
+**Pattern**: MVVM-C (Model-View-ViewModel-Coordinator) with Dependency Injection
+
+### Directory Structure
+```
+kiroku/
+├── App/ (DI Container, App Coordinator, Main App)
+├── Core/ 
+│   ├── Models/ (Recording, VideoChunk, Configurations)
+│   ├── Services/ (Screen Recording, Video Processing, File Management)
+│   ├── Repositories/ (Recording, Buffer, Settings)
+│   └── Utilities/ (Process Execution, FFmpeg, Screen Capture)
+├── Features/
+│   ├── Recording/ (Views, ViewModels, Coordinators)
+│   └── VideoEditing/ (Views, ViewModels, Coordinators)
+```
+
 ### Core Components
-- **kirokuApp.swift**: Main app entry point with NSApplicationDelegate for menubar functionality
-- **ContentView.swift**: SwiftUI interface with always-recording status and past recordings list
-- **ScreenRecordingManager.swift**: Core continuous recording logic using native screencapture with rolling buffer management
-- **VideoTrimmerView.swift**: Video trimming and cropping interface with AVPlayerView, interactive scrubber, and crop overlay
-- **kiroku.entitlements**: macOS permissions for screen recording and file access (camera/microphone removed)
-- **Info.plist**: Minimal configuration without camera/microphone privacy descriptions
+- **App/kirokuApp.swift**: Main app entry point with NSApplicationDelegate for menubar functionality
+- **App/AppCoordinator.swift**: Central navigation coordinator managing app flow
+- **App/DIContainer.swift**: Dependency injection container providing all services and ViewModels
+- **Features/Recording/Views/ContentView.swift**: SwiftUI interface with always-recording status and past recordings list
+- **Features/Recording/ViewModels/ContentViewModel.swift**: Business logic for main interface
+- **Features/VideoEditing/Views/VideoTrimmerView.swift**: Video trimming and cropping interface
+- **Core/Services/**: Protocol-oriented service layer (ScreenRecording, VideoProcessing, FileManagement, etc.)
+- **Core/Repositories/**: Data access layer (Recording, Buffer, Settings repositories)
+- **Core/Models/**: Domain models (Recording, VideoChunk, TrimConfiguration, etc.)
+- **kiroku.entitlements**: macOS permissions for screen recording and file access
+- **CODING_STYLE.md**: Comprehensive coding standards and architectural guidelines
 
 ### Technical Implementation
 - **Continuous Recording**: Uses `screencapture -v -V 10` for 10-second chunk recording with automatic termination
@@ -26,6 +47,7 @@ Kiroku is a macOS menubar app for continuous screen recording with a rolling buf
 - **GIF Export**: Two-pass FFmpeg conversion with palette generation for optimal quality
 - **Clipboard Integration**: Native pasteboard support with proper UTI types
 - **QuickTime Compatibility**: Re-encodes trimmed videos with H.264/AAC for universal playback
+- **Logging System**: Comprehensive os.log integration with categories (Recording, Buffer, Export, FileSystem, UI, Permissions, Process, Video)
 
 ### Key Features
 - Menubar-only interface (no dock icon)
@@ -72,14 +94,23 @@ Kiroku is a macOS menubar app for continuous screen recording with a rolling buf
 - Test app startup buffer clearing
 - Validate FFmpeg chunk merging accuracy and synchronization
 
+## Architectural Principles
+- **MVVM-C Pattern**: Strict separation of concerns with coordinators for navigation
+- **Protocol-Oriented Design**: All services use protocols for testability and flexibility
+- **Dependency Injection**: Complete DI container managing all dependencies
+- **Reactive State Management**: Combine publishers for reactive UI updates
+- **Async/Await**: Modern Swift concurrency throughout the codebase
+- **Single Responsibility**: Each component has one clear purpose
+- **Testability First**: Every component can be unit tested in isolation
+
 ## Codebase Patterns
-- ObservableObject pattern for state management
-- Process execution for native screencapture and FFmpeg operations
-- SwiftUI declarative UI with always-recording state indicators
-- Item-based sheet presentation for robust state management
-- KVO observers for AVPlayer state tracking
-- Sequential chunk processing with natural process termination
-- Rolling buffer management with automatic cleanup
-- Interactive SwiftUI overlays for crop selection with drag gestures
-- Coordinate scaling and validation for video processing
-- Proper error handling and user feedback
+- **@MainActor ViewModels**: Main thread isolation for UI state management
+- **Repository Pattern**: Data access abstraction layer
+- **Service Layer**: Business logic separated from UI components
+- **Coordinator Pattern**: Navigation logic separated from views
+- **Process Execution Abstraction**: External dependencies wrapped in protocols
+- **Domain Models**: Strong typing with domain-specific models
+- **Error Handling**: Comprehensive error types and propagation
+- **SwiftUI Best Practices**: Declarative UI with proper state management
+- **Protocol Boundaries**: Clear interfaces between layers
+- **Async Operation Management**: Proper task lifecycle and cancellation

@@ -8,6 +8,7 @@
 import Foundation
 import Combine
 import AppKit
+import os.log
 
 // MARK: - ContentViewModel
 @MainActor
@@ -62,6 +63,7 @@ final class ContentViewModel: ObservableObject {
     
     // MARK: - Public Methods
     func requestPermission() {
+        Logger.info("User requested screen recording permission", category: .permissions)
         Task {
             await permissionService.requestScreenRecordingPermission()
         }
@@ -70,10 +72,12 @@ final class ContentViewModel: ObservableObject {
     func checkPermission() {
         Task {
             hasPermission = await permissionService.checkScreenRecordingPermission()
+            Logger.info("Permission check result: \(hasPermission)", category: .permissions)
         }
     }
     
     func exportLastMinute() {
+        Logger.info("User triggered export last minute", category: .ui)
         Task {
             do {
                 isExporting = true
@@ -82,9 +86,10 @@ final class ContentViewModel: ObservableObject {
                 let recording = Recording(url: url, fileSize: fileSize)
                 try await recordingRepository.addRecording(recording)
                 isExporting = false
+                Logger.info("Export completed successfully", category: .ui)
             } catch {
                 isExporting = false
-                // Handle error
+                Logger.error("Export failed: \(error.localizedDescription)", category: .ui)
             }
         }
     }
@@ -94,22 +99,25 @@ final class ContentViewModel: ObservableObject {
     }
     
     func deleteRecording(_ recording: Recording) {
+        Logger.info("User deleting recording: \(recording.url.lastPathComponent)", category: .ui)
         Task {
             do {
                 try await fileManagementService.deleteFile(at: recording.url)
                 try await recordingRepository.deleteRecording(recording)
             } catch {
-                // Handle error
+                Logger.error("Failed to delete recording: \(error.localizedDescription)", category: .ui)
             }
         }
     }
     
     func showTrimmer(for recording: Recording) {
+        Logger.info("Opening trimmer for: \(recording.url.lastPathComponent)", category: .ui)
         selectedRecording = recording
         showingTrimmer = true
     }
     
     func exportAsGIF(_ recording: Recording) {
+        Logger.info("User exporting as GIF: \(recording.url.lastPathComponent)", category: .ui)
         Task {
             do {
                 let gifURL = try await videoProcessingService.exportAsGIF(url: recording.url)
@@ -117,7 +125,7 @@ final class ContentViewModel: ObservableObject {
                 let gifRecording = Recording(url: gifURL, fileSize: fileSize, type: .gif)
                 try await recordingRepository.addRecording(gifRecording)
             } catch {
-                // Handle error
+                Logger.error("GIF export failed: \(error.localizedDescription)", category: .ui)
             }
         }
     }
@@ -138,25 +146,24 @@ final class ContentViewModel: ObservableObject {
     
     // MARK: - Private Methods
     private func initialize() async {
+        Logger.info("Initializing ContentViewModel", category: .ui)
         do {
             try await fileManagementService.createDirectoriesIfNeeded()
             try await recordingRepository.loadRecordings()
-            hasPermission = await permissionService.checkScreenRecordingPermission()
-            
-            if hasPermission {
-                try await screenRecordingService.startContinuousRecording()
-            }
+            // Permission check and recording start will be handled by setupBindings
         } catch {
-            // Handle error
+            Logger.error("Initialization failed: \(error.localizedDescription)", category: .ui)
         }
     }
     
     private func setupBindings() {
         // Bind permission changes
         permissionService.hasScreenRecordingPermission
+            .removeDuplicates() // Prevent duplicate permission status updates
             .receive(on: DispatchQueue.main)
             .sink { [weak self] hasPermission in
                 self?.hasPermission = hasPermission
+                Logger.info("Permission status changed: \(hasPermission)", category: .permissions)
                 if hasPermission {
                     Task {
                         try? await self?.screenRecordingService.startContinuousRecording()

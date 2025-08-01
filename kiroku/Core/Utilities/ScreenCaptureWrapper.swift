@@ -6,6 +6,7 @@
 //
 
 import Foundation
+import os.log
 
 // MARK: - ScreenCaptureProcess
 private class ScreenCaptureProcess: CancellableProcess {
@@ -20,6 +21,7 @@ private class ScreenCaptureProcess: CancellableProcess {
     }
     
     func cancel() {
+        Logger.debug("Terminating screen capture process", category: .process)
         process.terminate()
     }
 }
@@ -40,6 +42,8 @@ final class ScreenCaptureWrapper: ScreenCaptureWrapperProtocol {
         duration: TimeInterval,
         completion: @escaping (Result<Void, Error>) -> Void
     ) -> CancellableProcess {
+        Logger.info("Starting screen recording - Output: \(outputURL.lastPathComponent), Duration: \(duration)s", category: .recording)
+        
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
         process.arguments = ["-v", "-V", String(Int(duration)), outputURL.path]
@@ -51,10 +55,12 @@ final class ScreenCaptureWrapper: ScreenCaptureWrapperProtocol {
         process.terminationHandler = { process in
             DispatchQueue.main.async {
                 if process.terminationStatus == 0 {
+                    Logger.info("Screen recording completed successfully - \(outputURL.lastPathComponent)", category: .recording)
                     completion(.success(()))
                 } else {
                     let data = pipe.fileHandleForReading.readDataToEndOfFile()
                     let errorOutput = String(data: data, encoding: .utf8) ?? "Unknown error"
+                    Logger.error("Screen recording failed - Status: \(process.terminationStatus), Error: \(errorOutput)", category: .recording)
                     completion(.failure(ScreenCaptureError.recordingFailed(errorOutput)))
                 }
             }
@@ -62,7 +68,9 @@ final class ScreenCaptureWrapper: ScreenCaptureWrapperProtocol {
         
         do {
             try process.run()
+            Logger.debug("Screen capture process started with PID: \(process.processIdentifier)", category: .process)
         } catch {
+            Logger.error("Failed to start screen capture process: \(error.localizedDescription)", category: .recording)
             completion(.failure(error))
         }
         

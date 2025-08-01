@@ -25,7 +25,8 @@ final class DIContainer {
         bufferRepository: bufferRepository,
         videoProcessingService: videoProcessingService,
         permissionService: permissionService,
-        settingsRepository: settingsRepository
+        settingsRepository: settingsRepository,
+        fileManagementService: fileManagementService
     )
     
     lazy var videoProcessingService: VideoProcessingServiceProtocol = VideoProcessingService(

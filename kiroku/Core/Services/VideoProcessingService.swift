@@ -8,6 +8,7 @@
 import Foundation
 import Combine
 import AVFoundation
+import os.log
 
 // MARK: - VideoProcessingService
 final class VideoProcessingService: VideoProcessingServiceProtocol {
@@ -34,6 +35,7 @@ final class VideoProcessingService: VideoProcessingServiceProtocol {
     
     // MARK: - VideoProcessingServiceProtocol
     func trimVideo(url: URL, configuration: TrimConfiguration) async throws -> URL {
+        Logger.info("Starting video trim - Input: \(url.lastPathComponent), Start: \(configuration.startTime)s, Duration: \(configuration.duration)s", category: .video)
         _processingProgress = 0.0
         
         let documentsPath = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
@@ -46,6 +48,10 @@ final class VideoProcessingService: VideoProcessingServiceProtocol {
         let outputURL = recordingsDir.appendingPathComponent(trimmedFilename)
         
         let cropFilter = configuration.cropConfiguration?.ffmpegCropFilter
+        if let crop = configuration.cropConfiguration {
+            let rect = crop.scaledCropRect
+            Logger.debug("Applying crop: x=\(Int(rect.origin.x)), y=\(Int(rect.origin.y)), width=\(Int(rect.width)), height=\(Int(rect.height))", category: .video)
+        }
         
         try await ffmpegWrapper.trim(
             input: url,
@@ -56,10 +62,12 @@ final class VideoProcessingService: VideoProcessingServiceProtocol {
         )
         
         _processingProgress = 1.0
+        Logger.info("Video trim completed - Output: \(outputURL.lastPathComponent)", category: .video)
         return outputURL
     }
     
     func exportAsGIF(url: URL) async throws -> URL {
+        Logger.info("Starting GIF export - Input: \(url.lastPathComponent)", category: .video)
         _processingProgress = 0.0
         
         let documentsPath = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
@@ -74,10 +82,12 @@ final class VideoProcessingService: VideoProcessingServiceProtocol {
         )
         
         _processingProgress = 1.0
+        Logger.info("GIF export completed - Output: \(gifURL.lastPathComponent)", category: .video)
         return gifURL
     }
     
     func mergeChunks(_ chunks: [VideoChunk]) async throws -> URL {
+        Logger.info("Starting chunk merge - Merging \(chunks.count) chunks", category: .video)
         _processingProgress = 0.0
         
         let documentsPath = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
@@ -88,9 +98,11 @@ final class VideoProcessingService: VideoProcessingServiceProtocol {
         let outputURL = recordingsDir.appendingPathComponent("Recording \(formatter.string(from: Date())).mov")
         
         let urls = chunks.map { $0.url }
+        Logger.debug("Chunks to merge: \(urls.map { $0.lastPathComponent })", category: .video)
         try await ffmpegWrapper.mergeVideos(inputs: urls, output: outputURL)
         
         _processingProgress = 1.0
+        Logger.info("Chunk merge completed - Output: \(outputURL.lastPathComponent)", category: .video)
         return outputURL
     }
     

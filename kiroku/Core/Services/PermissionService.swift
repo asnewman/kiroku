@@ -13,11 +13,13 @@ import AppKit
 // MARK: - PermissionService
 final class PermissionService: PermissionServiceProtocol {
     // MARK: - Published Properties
-    @Published private var _hasScreenRecordingPermission = false
+    @Published private var _hasScreenRecordingPermission: Bool?
     
     // MARK: - Publishers
     var hasScreenRecordingPermission: AnyPublisher<Bool, Never> {
-        $_hasScreenRecordingPermission.eraseToAnyPublisher()
+        $_hasScreenRecordingPermission
+            .compactMap { $0 } // Only emit non-nil values
+            .eraseToAnyPublisher()
     }
     
     // MARK: - Initialization
@@ -32,12 +34,17 @@ final class PermissionService: PermissionServiceProtocol {
         if #available(macOS 10.15, *) {
             let hasPermission = CGPreflightScreenCaptureAccess()
             await MainActor.run {
-                _hasScreenRecordingPermission = hasPermission
+                // Only update if the value has changed
+                if _hasScreenRecordingPermission != hasPermission {
+                    _hasScreenRecordingPermission = hasPermission
+                }
             }
             return hasPermission
         } else {
             await MainActor.run {
-                _hasScreenRecordingPermission = true
+                if _hasScreenRecordingPermission != true {
+                    _hasScreenRecordingPermission = true
+                }
             }
             return true
         }

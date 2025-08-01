@@ -7,6 +7,7 @@
 
 import Foundation
 import AVFoundation
+import os.log
 
 // MARK: - FFmpegWrapper
 final class FFmpegWrapper: FFmpegWrapperProtocol {
@@ -25,9 +26,11 @@ final class FFmpegWrapper: FFmpegWrapperProtocol {
         
         for path in possiblePaths {
             if FileManager.default.fileExists(atPath: path) {
+                Logger.debug("Found FFmpeg at: \(path)", category: .process)
                 return path
             }
         }
+        Logger.error("FFmpeg not found in any standard location", category: .process)
         return nil
     }
     
@@ -72,11 +75,16 @@ final class FFmpegWrapper: FFmpegWrapperProtocol {
             output.path
         ])
         
+        Logger.info("FFmpeg trim: \(input.lastPathComponent) -> \(output.lastPathComponent), start: \(startTime)s, duration: \(duration)s\(cropFilter != nil ? ", with crop" : "")", category: .process)
+        Logger.debug("FFmpeg arguments: \(arguments.joined(separator: " "))", category: .process)
+        
         let result = try await processExecutor.execute(command: ffmpegPath, arguments: arguments, timeout: nil)
         
         if !result.success {
+            Logger.error("FFmpeg trim failed: \(result.standardError)", category: .process)
             throw FFmpegError.processingFailed(result.standardError)
         }
+        Logger.info("FFmpeg trim completed successfully", category: .process)
     }
     
     func exportGIF(
@@ -98,8 +106,10 @@ final class FFmpegWrapper: FFmpegWrapperProtocol {
             paletteURL.path
         ]
         
+        Logger.info("FFmpeg GIF export: generating palette for \(input.lastPathComponent)", category: .process)
         let paletteResult = try await processExecutor.execute(command: ffmpegPath, arguments: paletteArgs, timeout: nil)
         if !paletteResult.success {
+            Logger.error("FFmpeg palette generation failed: \(paletteResult.standardError)", category: .process)
             throw FFmpegError.processingFailed(paletteResult.standardError)
         }
         
@@ -112,14 +122,17 @@ final class FFmpegWrapper: FFmpegWrapperProtocol {
             output.path
         ]
         
+        Logger.info("FFmpeg GIF export: creating GIF from palette", category: .process)
         let gifResult = try await processExecutor.execute(command: ffmpegPath, arguments: gifArgs, timeout: nil)
         
         // Clean up palette file
         try? FileManager.default.removeItem(at: paletteURL)
         
         if !gifResult.success {
+            Logger.error("FFmpeg GIF creation failed: \(gifResult.standardError)", category: .process)
             throw FFmpegError.processingFailed(gifResult.standardError)
         }
+        Logger.info("FFmpeg GIF export completed: \(output.lastPathComponent)", category: .process)
     }
     
     func mergeVideos(
@@ -129,6 +142,9 @@ final class FFmpegWrapper: FFmpegWrapperProtocol {
         guard let ffmpegPath = ffmpegPath else {
             throw FFmpegError.notFound
         }
+        
+        Logger.info("FFmpeg merge: concatenating \(inputs.count) videos", category: .process)
+        Logger.debug("Input files: \(inputs.map { $0.lastPathComponent })", category: .process)
         
         // Create concat list file
         let listPath = FileManager.default.temporaryDirectory.appendingPathComponent("concat_list.txt")
@@ -155,8 +171,10 @@ final class FFmpegWrapper: FFmpegWrapperProtocol {
         try? FileManager.default.removeItem(at: listPath)
         
         if !result.success {
+            Logger.error("FFmpeg merge failed: \(result.standardError)", category: .process)
             throw FFmpegError.processingFailed(result.standardError)
         }
+        Logger.info("FFmpeg merge completed: \(output.lastPathComponent)", category: .process)
     }
     
     func getVideoDuration(url: URL) async throws -> TimeInterval {

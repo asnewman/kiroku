@@ -70,6 +70,8 @@ kiroku/
 - Added proper sheet dismissal handling for video trimmer (clearing selectedRecording)
 - Created public interface method in ContentViewModel to access video editing coordinator
 - Improved separation of concerns between View and ViewModel layers
+- Fixed trimmed videos not appearing in recordings list by automatically adding them to repository
+- Added proper file size calculation and logging for trimmed recordings
 
 ## Development Notes
 

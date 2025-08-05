@@ -152,9 +152,25 @@ final class ContentViewModel: ObservableObject {
     ) -> AnyView {
         videoEditingCoordinator.showVideoTrimmer(
             for: recording,
-            onComplete: onComplete,
+            onComplete: { [weak self] trimmedURL in
+                Task { @MainActor in
+                    await self?.addTrimmedRecording(url: trimmedURL)
+                    onComplete(trimmedURL)
+                }
+            },
             onCancel: onCancel
         )
+    }
+    
+    private func addTrimmedRecording(url: URL) async {
+        do {
+            let fileSize = try await fileManagementService.getFileSize(at: url)
+            let recording = Recording(url: url, fileSize: fileSize)
+            try await recordingRepository.addRecording(recording)
+            Logger.info("Added trimmed recording: \(url.lastPathComponent)", category: .ui)
+        } catch {
+            Logger.error("Failed to add trimmed recording: \(error.localizedDescription)", category: .ui)
+        }
     }
     
     // MARK: - Private Methods

@@ -47,9 +47,20 @@ struct ContentView: View {
                 }
             }
         )) { item in
-            // Placeholder for trimmer view - will be implemented later
-            Text("Video Trimmer")
-                .frame(width: 500, height: 600)
+            if let selectedRecording = viewModel.selectedRecording {
+                viewModel.getVideoTrimmerView(
+                    for: selectedRecording,
+                    onComplete: { trimmedURL in
+                        viewModel.showingTrimmer = false
+                        viewModel.selectedRecording = nil
+                        // Recordings will refresh automatically via the repository binding
+                    },
+                    onCancel: {
+                        viewModel.showingTrimmer = false
+                        viewModel.selectedRecording = nil
+                    }
+                )
+            }
         }
     }
     

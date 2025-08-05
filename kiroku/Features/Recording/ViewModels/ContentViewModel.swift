@@ -8,6 +8,7 @@
 import Foundation
 import Combine
 import AppKit
+import SwiftUI
 import os.log
 
 // MARK: - ContentViewModel
@@ -142,6 +143,18 @@ final class ContentViewModel: ObservableObject {
     
     func quitApp() {
         NSApplication.shared.terminate(nil)
+    }
+    
+    func getVideoTrimmerView(
+        for recording: Recording,
+        onComplete: @escaping (URL) -> Void,
+        onCancel: @escaping () -> Void
+    ) -> AnyView {
+        videoEditingCoordinator.showVideoTrimmer(
+            for: recording,
+            onComplete: onComplete,
+            onCancel: onCancel
+        )
     }
     
     // MARK: - Private Methods

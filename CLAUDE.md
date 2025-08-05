@@ -65,6 +65,12 @@ kiroku/
 - Proper macOS permission flow for screen recording
 - Cursor capture in screen recordings
 
+### Recent Updates
+- Fixed video trimmer presentation to use actual VideoTrimmerView instead of placeholder
+- Added proper sheet dismissal handling for video trimmer (clearing selectedRecording)
+- Created public interface method in ContentViewModel to access video editing coordinator
+- Improved separation of concerns between View and ViewModel layers
+
 ## Development Notes
 
 ### Dependencies
